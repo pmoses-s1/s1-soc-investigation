@@ -44,7 +44,10 @@
   ::placeholder{color:#9d98bd}
   textarea{resize:vertical;min-height:60px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
   .row{display:flex;gap:12px}.row>*{flex:1}
-  .chk{display:flex;align-items:center;gap:8px;margin-top:12px}.chk input{width:auto;box-shadow:none}.chk label{margin:0}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:12px}.chk label{margin:0}
+  /* Restore native checkbox rendering (the global input rule sets appearance:none). */
+  input[type=checkbox]{-webkit-appearance:auto;appearance:auto;width:17px;height:17px;min-width:17px;
+    box-shadow:none;background:none;border-radius:5px;accent-color:var(--pur);cursor:pointer;padding:0}
   button{background:linear-gradient(135deg,var(--pur),var(--pur2));color:#fff;border:none;border-radius:14px;
     padding:14px 20px;font-size:14.5px;font-weight:700;cursor:pointer;width:100%;margin-top:16px;
     box-shadow:0 8px 22px rgba(123,92,246,.4),var(--nm-out-sm);transition:transform .15s,filter .15s}
