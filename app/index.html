@@ -145,10 +145,28 @@
     <!-- Run -->
     <div class="card">
       <h2>Run investigation</h2>
+      <div class="btnrow" id="modeRow" style="margin-bottom:10px">
+        <button class="ghost sm" id="modeSingle">Single investigation</button>
+        <button class="ghost sm" id="modeBatch">Batch (user list)</button>
+      </div>
       <div class="row">
         <div><label>Case ID <span class="help" data-tip="Your case reference. Becomes the output subfolder name.">?</span></label><input id="case" placeholder="CASE-1234"></div>
-        <div><label>Entity <span class="help" data-tip="The subject of the investigation: user email, username, host, or IP. Substituted into {{entity}} in every query.">?</span></label><input id="entity" placeholder="user@corp.com"></div>
+        <div id="entityWrap"><label>Entity <span class="help" data-tip="The subject of the investigation: user email, username, host, or IP. Substituted into {{entity}} in every query.">?</span></label><input id="entity" placeholder="user@corp.com"></div>
       </div>
+
+      <div id="batchWrap" style="display:none">
+        <label>Users CSV <span class="help" data-tip="One CSV for the whole batch. First row = column headers; each following row is one user and their variables. Columns: email (required), hostname, agent_uuid, ip, username, sf_user_id, session. Datatables are the same for everyone and are set globally in Variables, not per row.">?</span></label>
+        <div class="hint">One CSV, first row = headers. Columns are the same variables as single mode: <b>email</b> (required), hostname, agent_uuid, ip, username, sf_user_id, session. Each row is one user. Datatables are global (set in Variables), not per row.</div>
+        <textarea id="userList" placeholder="email,hostname,agent_uuid,ip,username,sf_user_id,session&#10;jane.smith@corp.com,LT-JANE,,10.0.0.5,jsmith,,&#10;john.doe@corp.com,LT-JOHN,,,jdoe,," style="min-height:80px"></textarea>
+        <div class="btnrow">
+          <button class="ghost sm" id="btnUploadUsers">Upload CSV</button>
+          <input type="file" id="userFile" accept=".csv,.txt,.tsv" style="display:none">
+          <button class="ghost sm" id="btnTemplate">CSV template</button>
+        </div>
+        <div class="hint" id="subjectsHint"></div>
+        <div id="subjectsPreview" style="max-height:170px;overflow:auto"></div>
+      </div>
+
       <label>Query catalog <span class="help" data-tip="The standard query set to run for this case. Use Edit / New / Import / Validate to manage it.">?</span></label>
       <select id="catalog"></select>
       <div class="btnrow">
@@ -165,9 +183,14 @@
         <span id="varsSummary" class="hint" style="align-self:center"></span>
       </div>
       <div class="row" style="margin-top:8px">
-        <div><label>Lookback (days) <span class="help" data-tip="How many days back to investigate. 90+ is typical for insider-threat and forensic cases.">?</span></label><input id="lookback" type="number" value="90"></div>
+        <div><label>Lookback (days) <span class="help" data-tip="How many days back to investigate, ending now. Used when no date range is set. 90+ is typical.">?</span></label><input id="lookback" type="number" value="90"></div>
         <div><label>Slice size (days) <span class="help" data-tip="Days per slice. Smaller slices are more resilient and cache better. 1 day is the recommended default.">?</span></label><input id="sliceDays" type="number" value="1"></div>
       </div>
+      <div class="row">
+        <div><label>From <span class="help" data-tip="Optional absolute start date. Set From and To to investigate a fixed window, e.g. From 2026-04-01 To 2026-04-30 for all of April. Overrides lookback days.">?</span></label><input id="fromDate" type="date"></div>
+        <div><label>To <span class="help" data-tip="Optional absolute end date (inclusive). With From, defines a fixed window and overrides lookback days.">?</span></label><input id="toDate" type="date"></div>
+      </div>
+      <div class="hint" id="rangeHint"></div>
       <label>Output folder <span class="help" data-tip="Where results, logs, the ledger, and the .xlsx workbook are written. Blank uses the default base (the mounted /data folder in Docker).">?</span></label>
       <input id="outputDir" placeholder="(default output base)">
       <div class="hint" id="outHint"></div>
@@ -190,8 +213,12 @@
   </div>
 
   <div>
+    <div class="card" id="batchCard" style="display:none">
+      <h2>Batch runs <span id="batchLabel" class="muted" style="font-weight:400;font-size:12px"></span></h2>
+      <div id="batchList"></div>
+    </div>
     <div class="card">
-      <h2>Verification</h2>
+      <h2>Verification <span id="vLabel" class="muted" style="font-weight:400;font-size:12px"></span></h2>
       <div id="verdict"><span class="muted">Run an investigation to see per-query verification.</span></div>
       <div id="downloads" class="btnrow"></div>
       <div id="stats" style="margin-top:12px"></div>
@@ -242,8 +269,12 @@
       <div><label>Salesforce user ID <span class="help" data-tip="{{sf_user_id}} — the 18-char Salesforce user id.">?</span></label><input id="v_sf_user_id"></div>
       <div><label>Session <span class="help" data-tip="{{session}} — a session key to reconstruct a session timeline.">?</span></label><input id="v_session"></div>
     </div>
-    <label>Custom variables <span class="help" data-tip="One per line as name=value. Fills any other {{placeholder}} a catalog uses, including optional config datatable names (dt_*). Leave blank to skip those queries.">?</span></label>
-    <textarea id="v_custom" placeholder="one per line, e.g.&#10;dt_costcenters=CostCenters&#10;dt_accounts_intune=Accounts_intune"></textarea>
+    <div style="margin-top:14px;font-size:12.5px;color:var(--label);font-weight:600">Config datatables (optional)
+      <span class="help" data-tip="The datatable names for the identity-mapping queries. Set the ones your tenant has; queries that need an unset datatable are skipped. Placeholders are pre-filled with the source workbook's names.">?</span></div>
+    <div class="hint">Set only the datatables your tenant has. Leave blank to skip those queries.</div>
+    <div id="dtFields"></div>
+    <label>Custom variables <span class="help" data-tip="One per line as name=value. Fills any other {{placeholder}} a catalog uses.">?</span></label>
+    <textarea id="v_custom" placeholder="one per line, e.g.  repo=acme/payments"></textarea>
     <button id="btnVarsSave">Save variables</button>
   </div>
 </div>
@@ -257,6 +288,7 @@ async function apiPost(p,b){return (await fetch(p,{method:"POST",headers:hdrs(),
 const $=id=>document.getElementById(id);
 
 let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
+let DTS=[], MODE="single", SUBJECTS=[], BATCH=[], BATCHPOLL=null;
 let VARS={};
 try{ VARS=JSON.parse(localStorage.getItem("s1ie_vars")||"{}"); }catch(e){ VARS={}; }
 const KNOWN_VARS=["hostname","agent_uuid","ip","username","sf_user_id","session"];
@@ -276,7 +308,9 @@ function updateCatVars(){
 }
 $("btnVars").onclick=()=>{
   KNOWN_VARS.forEach(k=>{ $("v_"+k).value=VARS[k]||""; });
-  $("v_custom").value=Object.entries(VARS).filter(([k])=>!KNOWN_VARS.includes(k)).map(([k,v])=>`${k}=${v}`).join("\n");
+  DTS.forEach(dt=>{ const el=$("dt_"+dt.var); if(el) el.value=VARS[dt.var]||""; });
+  const dtset=new Set(DTS.map(dt=>dt.var));
+  $("v_custom").value=Object.entries(VARS).filter(([k])=>!KNOWN_VARS.includes(k)&&!dtset.has(k)).map(([k,v])=>`${k}=${v}`).join("\n");
   $("varsModal").classList.add("open");
 };
 $("varsClose").onclick=()=>$("varsModal").classList.remove("open");
@@ -284,6 +318,7 @@ $("varsModal").onclick=e=>{ if(e.target.id==="varsModal")$("varsModal").classLis
 $("btnVarsSave").onclick=()=>{
   const v={};
   KNOWN_VARS.forEach(k=>{ const x=$("v_"+k).value.trim(); if(x)v[k]=x; });
+  DTS.forEach(dt=>{ const el=$("dt_"+dt.var); if(el&&el.value.trim()) v[dt.var]=el.value.trim(); });
   ($("v_custom").value||"").split("\n").forEach(line=>{
     const i=line.indexOf("="); if(i>0){ const k=line.slice(0,i).trim(); const val=line.slice(i+1).trim(); if(k)v[k]=val; }
   });
@@ -314,7 +349,20 @@ async function loadConfig(){
   sel.onchange=updateCatVars;
   setConn(c.creds_ok,c.console_url,c.num_tokens);
   if(c.console_url&&!$("console").value)$("console").value=c.console_url;
+  DTS=c.datatables||[]; renderDtFields();
   renderVarsSummary(); updateCatVars();
+}
+function renderDtFields(){
+  const box=$("dtFields"); if(!box) return; box.innerHTML="";
+  for(let i=0;i<DTS.length;i+=2){
+    const row=document.createElement("div"); row.className="row";
+    [DTS[i],DTS[i+1]].filter(Boolean).forEach(dt=>{
+      const col=document.createElement("div");
+      col.innerHTML=`<label style="font-weight:400">${dt.label}</label><input id="dt_${dt.var}" placeholder="${dt.default}">`;
+      row.appendChild(col);
+    });
+    box.appendChild(row);
+  }
 }
 function setConn(ok,url,n){
   $("cdot").className="dot"+(ok?" on":"");
@@ -343,23 +391,44 @@ $("btnConnect").onclick=async()=>{
   setConn(r.creds_ok,r.console_url,r.num_tokens); $("tokens").value="";
 };
 
-$("btnRun").onclick=async()=>{
-  const body={case:$("case").value.trim()||"case",entity:$("entity").value.trim(),catalog:$("catalog").value,
+function buildBaseBody(){
+  const b={case:$("case").value.trim()||"case",catalog:$("catalog").value,
     lookback:parseInt($("lookback").value)||90,sliceDays:parseInt($("sliceDays").value)||1,
     outputDir:$("outputDir").value.trim(),pool:parseInt($("pool").value)||null,
     maxAttempts:parseInt($("maxAttempts").value)||4,subdivide:$("subdivide").checked,
     useCache:$("useCache").checked,priority:$("priority").value,mock:$("mock").checked,mockThrottle:0,
     vars:VARS};
-  if(!body.entity){alert("Entity is required");return;}
-  const r=await apiPost("/api/run",body);
-  if(r.error){alert(r.error);return;}
-  CURRENT=r.run_id; LASTSEQ=0;
+  const f=$("fromDate").value, t=$("toDate").value;
+  if(f&&t){ b.startDate=f; b.endDate=t; }
+  return b;
+}
+function viewRun(run_id, run_dir){
+  CURRENT=run_id; LASTSEQ=0;
   $("log").innerHTML=""; $("vtable").innerHTML=""; $("stats").innerHTML=""; $("downloads").innerHTML="";
-  $("runlabel").textContent="· "+r.run_id;
-  $("verdict").innerHTML='<span class="badge run">RUNNING</span> <span class="muted">'+r.run_dir+'</span>';
-  $("btnRun").disabled=true;
+  $("runlabel").textContent="· "+run_id; $("vLabel").textContent="· "+run_id;
+  $("verdict").innerHTML='<span class="badge run">RUNNING</span> <span class="muted">'+(run_dir||"")+'</span>';
   const cb=$("btnCancel"); cb.style.display="block"; cb.disabled=false; cb.textContent="Cancel run (resumable)";
   if(POLL)clearInterval(POLL); POLL=setInterval(poll,1000); poll();
+}
+$("btnRun").onclick=async()=>{
+  const body=buildBaseBody();
+  if(MODE==="single"){
+    body.entity=$("entity").value.trim();
+    if(!body.entity){alert("Entity is required");return;}
+    const r=await apiPost("/api/run",body);
+    if(r.error){alert(r.error);return;}
+    $("btnRun").disabled=true; viewRun(r.run_id,r.run_dir);
+  } else {
+    parseSubjects();
+    if(!SUBJECTS.length){alert("Add users (paste or upload a CSV list) for batch mode");return;}
+    body.subjects=SUBJECTS;
+    $("btnRun").disabled=true; $("btnRun").textContent="Starting batch…";
+    const r=await apiPost("/api/run",body);
+    $("btnRun").disabled=false; $("btnRun").textContent="Start batch investigation";
+    if(r.error){alert(r.error);return;}
+    BATCH=r.batch||[]; renderBatch(); pollBatch();
+    if(BATCH[0]) viewRun(BATCH[0].run_id,BATCH[0].run_dir);
+  }
 };
 
 $("btnCancel").onclick=async()=>{
@@ -498,6 +567,99 @@ $("btnCatValidate").onclick=async()=>{
   $("verdict").innerHTML='<span class="muted">Validation results below (does not run the investigation).</span>';
 };
 
+/* ---------- batch mode: users, enrichment, batch runs ---------- */
+function setMode(m){
+  MODE=m; const single=m==="single";
+  $("entityWrap").style.display=single?"block":"none";
+  $("batchWrap").style.display=single?"none":"block";
+  if(single) $("batchCard").style.display="none"; else if(BATCH.length) $("batchCard").style.display="block";
+  $("modeSingle").style.background=single?"linear-gradient(135deg,var(--pur),var(--pur2))":"";
+  $("modeSingle").style.color=single?"#fff":"";
+  $("modeBatch").style.background=single?"":"linear-gradient(135deg,var(--pur),var(--pur2))";
+  $("modeBatch").style.color=single?"":"#fff";
+  $("btnRun").textContent=single?"Start investigation":"Start batch investigation";
+}
+$("modeSingle").onclick=()=>setMode("single");
+$("modeBatch").onclick=()=>setMode("batch");
+
+function splitCsv(line){ return line.split(",").map(s=>s.trim().replace(/^"|"$/g,"")); }
+const COLMAP={hostname:["hostname","host","device","devicehostname","endpoint","endpoint.name","computer"],
+  agent_uuid:["agent_uuid","agentuuid","agent.uuid","uuid"],ip:["ip","ipaddress","ip_address"],
+  username:["username","login","samaccountname","user_name"],
+  sf_user_id:["sf_user_id","salesforce_user_id","sfuserid"],session:["session"]};
+function parseSubjects(){
+  const text=$("userList").value.trim(); SUBJECTS=[];
+  if(!text){renderSubjects();return;}
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(lines[0] && lines[0].includes(",")){
+    const headers=splitCsv(lines[0]).map(h=>h.toLowerCase());
+    const eIdx=headers.findIndex(h=>["email","entity","user","upn","userprincipalname"].includes(h));
+    for(const line of lines.slice(1)){
+      const cols=splitCsv(line);
+      const ent=(eIdx>=0?cols[eIdx]:cols[0])||""; if(!ent)continue;
+      const vars={};
+      for(const [v,alts] of Object.entries(COLMAP)){
+        const idx=headers.findIndex(h=>alts.includes(h));
+        if(idx>=0 && cols[idx]) vars[v]=cols[idx];
+      }
+      SUBJECTS.push({entity:ent,vars});
+    }
+  } else { lines.forEach(l=>SUBJECTS.push({entity:l,vars:{}})); }
+  renderSubjects();
+}
+function renderSubjects(){
+  $("subjectsHint").textContent = SUBJECTS.length?`${SUBJECTS.length} user${SUBJECTS.length==1?"":"s"} loaded`:"";
+  if(!SUBJECTS.length){$("subjectsPreview").innerHTML="";return;}
+  const cols=["entity","hostname","agent_uuid","ip","username"];
+  $("subjectsPreview").innerHTML='<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>'+
+    SUBJECTS.slice(0,100).map(s=>'<tr>'+cols.map(c=>`<td class="kv">${c==="entity"?s.entity:(s.vars[c]||"")}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
+}
+$("btnTemplate").onclick=()=>{
+  const csv="email,hostname,agent_uuid,ip,username,sf_user_id,session\njane.smith@corp.com,LT-JANE,,10.0.0.5,jsmith,,\njohn.doe@corp.com,LT-JOHN,,,jdoe,,\n";
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+  a.download="batch_users_template.csv"; a.click();
+};
+$("btnUploadUsers").onclick=()=>$("userFile").click();
+$("userFile").onchange=e=>{ const f=e.target.files[0]; if(!f)return; const rd=new FileReader(); rd.onload=()=>{$("userList").value=rd.result;parseSubjects();}; rd.readAsText(f); };
+$("userList").onblur=parseSubjects;
+function renderBatch(){
+  $("batchCard").style.display="block";
+  $("batchLabel").textContent=`${BATCH.length} user${BATCH.length==1?"":"s"}`;
+  const pill=(st)=> st==="complete"?'<span class="pill pass">complete</span>'
+      : st==="cancelled"?'<span class="pill incomplete">cancelled</span>'
+      : st==="error"?'<span class="pill failed">error</span>'
+      : st==="incomplete"?'<span class="pill incomplete">incomplete</span>'
+      : '<span class="pill incomplete">running</span>';
+  $("batchList").innerHTML='<table><thead><tr><th>User</th><th>Status</th><th class="n">Passed</th></tr></thead><tbody>'+
+    BATCH.map((b,i)=>{ const v=b.verification;
+      const vt=v?`${v.passed_queries}/${v.total_queries}`+(v.skipped_queries?` (+${v.skipped_queries})`:""):"";
+      return `<tr style="cursor:pointer" data-i="${i}"><td>${b.entity}</td><td>${pill(b.status||"running")}</td><td class="n">${vt}</td></tr>`;
+    }).join('')+'</tbody></table>';
+  [...$("batchList").querySelectorAll("tr[data-i]")].forEach(tr=>tr.onclick=()=>{const b=BATCH[+tr.dataset.i];viewRun(b.run_id,b.run_dir);});
+}
+function pollBatch(){
+  if(BATCHPOLL)clearInterval(BATCHPOLL);
+  BATCHPOLL=setInterval(async()=>{
+    let running=false;
+    for(const b of BATCH){
+      try{ const s=await apiGet(`/api/status?runId=${encodeURIComponent(b.run_id)}`);
+        b.status=s.status; b.verification=s.verification; if(s.status==="running")running=true; }catch(e){}
+    }
+    renderBatch();
+    if(!running){clearInterval(BATCHPOLL);BATCHPOLL=null;}
+  },2000);
+}
+
+function updateRangeHint(){
+  const f=$("fromDate").value, t=$("toDate").value;
+  if(f&&t){ const days=Math.round((new Date(t)-new Date(f))/86400000)+1;
+    $("rangeHint").textContent=`Window: ${f} → ${t} (${days} day${days==1?"":"s"}); overrides lookback days.`; }
+  else if(f||t){ $("rangeHint").textContent="Set both From and To to use a fixed date range."; }
+  else { $("rangeHint").textContent=""; }
+}
+$("fromDate").onchange=updateRangeHint; $("toDate").onchange=updateRangeHint;
+
+setMode("single");
 loadConfig();
 </script>
 </body>

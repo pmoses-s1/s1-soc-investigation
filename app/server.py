@@ -52,6 +52,18 @@ USER_CATALOGS = OUTPUT_BASE / "catalogs"   # writable, persists on the output vo
 CATALOG_REPO = os.environ.get("S1IE_CATALOG_REPO", "pmoses-s1/s1-soc-investigation")
 CATALOG_REPO_PATH = os.environ.get("S1IE_CATALOG_REPO_PATH", "catalogs")
 CATALOG_REPO_REF = os.environ.get("S1IE_CATALOG_REPO_REF", "main")
+# Config datatable placeholders (the {{dt_*}} template vars). Shown as dedicated
+# fields in the Variables modal; the default is the table name in the source workbook.
+DATATABLES = [
+    {"var": "dt_costcenters", "default": "CostCenters", "label": "Cost centers / HR"},
+    {"var": "dt_accounts_intune", "default": "Accounts_intune", "label": "Intune devices"},
+    {"var": "dt_accounts_jamf", "default": "Accounts_Jamf", "label": "Jamf devices"},
+    {"var": "dt_accounts_github", "default": "Accounts_Github", "label": "GitHub accounts"},
+    {"var": "dt_accounts_google", "default": "Accounts_Google", "label": "Google accounts"},
+    {"var": "dt_jumpcloud_user_summary", "default": "jumpcloud_user_summary", "label": "JumpCloud users"},
+    {"var": "dt_monitored_users_enriched", "default": "monitored_users_enriched", "label": "Monitored users (enriched)"},
+    {"var": "dt_monitored_users_test", "default": "monitored_users_test", "label": "Monitored users (test)"},
+]
 AUTH_TOKEN = os.environ.get("S1IE_AUTH_TOKEN", "").strip()
 EXPOSED = os.environ.get("S1IE_BIND_ALL", "").strip().lower() in ("1", "true", "yes", "on")
 _EXTRA_ORIGINS = {o.strip() for o in os.environ.get("S1IE_ALLOWED_ORIGINS", "").split(",") if o.strip()}
@@ -193,7 +205,8 @@ def start_run(d: dict) -> dict:
 
     mock = bool(d.get("mock"))
     config = build_config(mock, int(d.get("mockTokens", 2)))
-    run_id = d.get("runId") or f"{case}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    run_id = d.get("runId") or f"{case}-{_safe(entity)[:24]}-{stamp}"
     out_base = _resolve_output_dir(d.get("outputDir"))
     run_dir = out_base / _safe(case) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -210,10 +223,11 @@ def start_run(d: dict) -> dict:
                                  cache_dir=out_base / ".slice_cache",
                                  use_cache=bool(d.get("useCache", True)))
     params = RunParams(
-        case_id=case, entity=entity, lookback_days=int(d.get("lookback", 90)),
+        case_id=case, entity=entity, lookback_days=int(d.get("lookback", 90) or 90),
         slice_days=int(d.get("sliceDays", 1)), max_attempts=int(d.get("maxAttempts", 4)),
         subdivide_on_timeout=bool(d.get("subdivide", True)),
-        priority=d.get("priority", "LOW"), variables=d.get("vars") or {})
+        priority=d.get("priority", "LOW"), variables=d.get("vars") or {},
+        start_date=(d.get("startDate") or None), end_date=(d.get("endDate") or None))
 
     reg = {"run_id": run_id, "case": case, "entity": entity, "run_dir": str(run_dir),
            "catalog": catalog.name, "status": "running", "activity": activity,
@@ -292,6 +306,100 @@ def refresh_catalogs_from_repo() -> dict:
             "repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}"}
 
 
+def enrich_users(d: dict) -> dict:
+    """Resolve device info per user.
+
+    method="zia" (default) mirrors the Monitored User Enrichment HA flow: it derives
+    each user's device from ZIA web logs (event.user -> event.devicehostname) over a
+    recent window and picks the most frequent host. This works on any tenant with ZIA.
+
+    method="datatable" reads a config datatable (e.g. monitored_users_enriched) and
+    auto-detects the hostname / agent-uuid columns by name.
+    """
+    emails = [str(e).strip() for e in (d.get("emails") or []) if str(e).strip()]
+    if not emails:
+        raise ValueError("no users to enrich")
+    mock = bool(d.get("mock"))
+    method = d.get("method") or "zia"
+    config = build_config(mock)
+    from s1engine.lrq_client import LRQClient, RequestsTransport
+    from s1engine.rate_limiter import TokenBucket
+    from s1engine.slicing import iso_z
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    transport = None
+    if mock:
+        from s1engine.testing import FakeTransport
+        transport = FakeTransport()
+    tp = transport or RequestsTransport(verify_tls=config.verify_tls, pool_maxsize=4)
+    client = LRQClient(config.console_url or "https://mock.local", (config.tokens or ["__mock__"])[0],
+                       TokenBucket(config.rps, config.burst), tp,
+                       poll_interval_s=config.poll_interval_s,
+                       query_timeout_s=min(90.0, config.query_timeout_s))
+    inlist = ",".join('"' + e.replace('"', '') + '"' for e in emails[:2000])
+    now = _dt.now(_tz.utc)
+
+    if method == "zia":
+        uf = d.get("userField") or "event.user"
+        hf = d.get("hostField") or "event.devicehostname"
+        window_days = int(d.get("windowDays", 30))
+        pq = (f"serverHost='zia' {hf}=* {uf} in ({inlist})\n"
+              f"| group cnt=count() by _user={uf}, _host={hf}\n| sort -cnt\n| limit 5000")
+        res = client.run_pq(pq, iso_z(now - _td(days=window_days)), iso_z(now),
+                            tenant=config.tenant, account_ids=config.account_ids or None)
+        ci = {c: i for i, c in enumerate(res.columns)}
+        best = {}
+        for r in res.values:
+            def g(c):
+                return r[ci[c]] if c in ci and ci[c] < len(r) else None
+            u, h, c = g("_user"), g("_host"), g("cnt")
+            if not u or not h:
+                continue
+            try:
+                cval = float(c)
+            except (TypeError, ValueError):
+                cval = 1.0
+            if u not in best or cval > best[u][1]:
+                best[str(u)] = (h, cval)
+        enriched = {u: {"hostname": h} for u, (h, _) in best.items()}
+        return {"method": "zia", "source": "ZIA event.devicehostname", "matched": len(enriched),
+                "requested": len(emails), "enriched": enriched,
+                "columns": res.columns, "rows": res.values[:500]}
+
+    # method == "datatable"
+    dt = d.get("datatable") or "monitored_users_enriched"
+    email_col = d.get("emailCol") or "email"
+    pq = f"| dataset 'config://datatables/{dt}'\n| filter {email_col} in ({inlist})\n| limit 5000"
+    res = client.run_pq(pq, iso_z(now - _td(days=1)), iso_z(now),
+                        tenant=config.tenant, account_ids=config.account_ids or None)
+    cols = res.columns
+    ci = {c: i for i, c in enumerate(cols)}
+
+    def pick(pats):
+        for c in cols:
+            if any(pat in c.lower() for pat in pats):
+                return c
+        return None
+    host_c = pick(["devicehostname", "endpoint.name", "hostname", "host", "device", "computer"])
+    agent_c = pick(["agent.uuid", "agentuuid", "agent_uuid", "uuid"])
+    ecol = email_col if email_col in ci else pick(["email", "user", "principal", "upn"])
+    enriched = {}
+    for r in res.values:
+        def g(c):
+            return r[ci[c]] if c and c in ci and ci[c] < len(r) else None
+        em = g(ecol)
+        if not em:
+            continue
+        v = {}
+        if host_c and g(host_c):
+            v["hostname"] = g(host_c)
+        if agent_c and g(agent_c):
+            v["agent_uuid"] = g(agent_c)
+        enriched[str(em)] = v
+    return {"method": "datatable", "datatable": dt, "columns": cols, "rows": res.values[:500],
+            "host_column": host_c, "agent_column": agent_c, "email_column": ecol,
+            "enriched": enriched, "matched": len(enriched), "requested": len(emails)}
+
+
 def save_catalog(d: dict) -> dict:
     filename = _safe(d.get("filename") or "").strip()
     content = d.get("content") or ""
@@ -343,7 +451,8 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, {**creds_status(), "catalogs": list_catalogs(),
                                     "output_base": str(OUTPUT_BASE), "exposed": EXPOSED,
                                     "version": os.environ.get("S1IE_VERSION") or ENGINE_VERSION,
-                                    "catalog_repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}"})
+                                    "catalog_repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}",
+                                    "datatables": DATATABLES})
         if p == "/api/runs":
             with _RUNS_LOCK:
                 runs = [{"run_id": r["run_id"], "case": r["case"], "entity": r["entity"],
@@ -431,7 +540,22 @@ class H(BaseHTTPRequestHandler):
                     _CREDS["account_ids"] = acct or []
                 return self._send(200, creds_status())
             if p == "/api/run":
+                subjects = d.get("subjects")
+                if isinstance(subjects, list) and subjects:
+                    # Batch mode: one run per subject, merging global vars with per-user vars.
+                    batch = []
+                    base_vars = d.get("vars") or {}
+                    for s in subjects:
+                        ent = (s.get("entity") or "").strip()
+                        if not ent:
+                            continue
+                        sd = {**d, "entity": ent, "vars": {**base_vars, **(s.get("vars") or {})}}
+                        sd.pop("subjects", None)
+                        batch.append({"entity": ent, **start_run(sd)})
+                    return self._send(200, {"batch": batch, "count": len(batch)})
                 return self._send(200, start_run(d))
+            if p == "/api/enrich":
+                return self._send(200, enrich_users(d))
             if p == "/api/cancel":
                 reg = _RUNS.get(d.get("runId"))
                 if not reg:

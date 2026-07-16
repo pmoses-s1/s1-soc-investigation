@@ -24,7 +24,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -38,7 +38,7 @@ from .lrq_client import (LRQClient, QuerySyntaxError, RateLimitError,
                          ServerError, LRQError, RequestsTransport, Transport)
 from .merge import merge_query_results
 from .rate_limiter import AIMDController, TokenBucket
-from .slicing import Slice, iso_z, slices_for_lookback, subdivide
+from .slicing import Slice, day_slices, iso_z, slices_for_lookback, subdivide
 from .workbook import build_workbook
 
 
@@ -49,12 +49,14 @@ ProgressFn = Callable[[Dict[str, Any]], None]
 class RunParams:
     case_id: str
     entity: str
-    lookback_days: int
+    lookback_days: int = 90
     slice_days: int = 1
     max_attempts: int = 4
     subdivide_on_timeout: bool = True
     priority: str = "LOW"
     variables: Optional[Dict[str, str]] = None
+    start_date: Optional[str] = None   # "YYYY-MM-DD" (inclusive), overrides lookback_days
+    end_date: Optional[str] = None     # "YYYY-MM-DD" (inclusive)
 
 
 class InvestigationEngine:
@@ -125,9 +127,18 @@ class InvestigationEngine:
         variables = dict(params.variables or {})
         variables.setdefault("entity", params.entity)
         scope = self.scope_signature()
-        slices = slices_for_lookback(params.lookback_days, slice_days=params.slice_days)
+        if params.start_date and params.end_date:
+            # Absolute window (e.g. all of April): end_date is inclusive, so the
+            # exclusive upper bound is the day after.
+            s = datetime.fromisoformat(params.start_date).replace(tzinfo=timezone.utc)
+            e = datetime.fromisoformat(params.end_date).replace(tzinfo=timezone.utc) + timedelta(days=1)
+            slices = day_slices(s, e, slice_days=params.slice_days)
+            window = {"start_date": params.start_date, "end_date": params.end_date}
+        else:
+            slices = slices_for_lookback(params.lookback_days, slice_days=params.slice_days)
+            window = {"lookback_days": params.lookback_days}
         ledger.record_run(run_id, params.case_id, params.entity, catalog.name, {
-            "lookback_days": params.lookback_days,
+            **window,
             "slice_days": params.slice_days,
             "num_slices": len(slices),
             "max_attempts": params.max_attempts,
