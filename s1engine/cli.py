@@ -32,6 +32,7 @@ from .activity import ActivityLog
 from .catalog import load_catalog
 from .config import load_config
 from .engine import InvestigationEngine, RunParams
+from .export import zip_run
 from .ledger import Ledger
 from .verify import format_text, verify_run
 
@@ -53,12 +54,20 @@ def _make_progress(verbose: bool):
                       f"{e['client']} gov={e['gov_limit']}")
             elif counters["done"] % 25 == 0:
                 print(f"[..] {counters['done']} slices done")
+        elif ev == "slice_cached":
+            counters["done"] += 1
+            if verbose:
+                print(f"[cache] {e['query']} {e['slice']} rows={e['rows']} (served from cache)")
         elif ev == "slice_failed":
             print(f"[FAIL] {e['query']} {e['slice']}: {e['error']}")
         elif ev == "permanent":
             print(f"[PERM] {e['query']} {e['slice']}: {e['error']}")
         elif ev == "subdivided":
             print(f"[split] {e['query']} {e['slice']} -> {e['children']} sub-slices")
+        elif ev == "workbook":
+            print(f"[xlsx] workbook -> {e['path']}")
+        elif ev == "warning":
+            print(f"[warn] {e['msg']}")
         elif ev == "finalized":
             print(f"[done] complete={e['complete']} results -> {e['results_dir']}")
 
@@ -99,10 +108,12 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     ledger = Ledger(run_dir / "ledger.db")
     activity = ActivityLog(run_dir / "activity.jsonl")
+    cache_dir = Path(args.out) / ".slice_cache"
     engine = InvestigationEngine(config, output_root=run_dir, transport=transport,
                                  pool_size=args.pool,
                                  on_progress=_make_progress(args.verbose),
-                                 activity=activity)
+                                 activity=activity,
+                                 cache_dir=cache_dir, use_cache=not args.no_cache)
     params = RunParams(
         case_id=args.case, entity=args.entity, lookback_days=args.lookback,
         slice_days=args.slice_days, max_attempts=args.max_attempts,
@@ -113,16 +124,19 @@ def cmd_run(args: argparse.Namespace) -> int:
     engine.plan(run_id, catalog, params, ledger)
     result = engine.run(run_id, ledger, params)
     manifest = engine.finalize(run_id, ledger, catalog, params)
-    elapsed = time.monotonic() - t0
-
     result_rows = {q["query_id"]: q["result_rows"] for q in manifest["queries"]}
     verification = verify_run(ledger, run_id, catalog, result_rows=result_rows)
+    workbook = engine.write_workbook(run_id, manifest, verification.to_dict(), params)
+    elapsed = time.monotonic() - t0
 
     print("\n=== run summary ===")
     print(f"run_id     : {run_id}")
     print(f"output dir : {run_dir}")
     print(f"wall clock : {elapsed:.1f}s")
     print(f"stats      : {json.dumps(result['stats'])}")
+    print(f"cache      : {json.dumps(result.get('cache', {}))}")
+    if workbook:
+        print(f"workbook   : {workbook}")
     print()
     print(format_text(verification))
     activity.log({"event": "verification", "passed": verification.passed,
@@ -152,6 +166,14 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    data, fname = zip_run(args.run_dir, kind=args.kind)
+    out = Path(args.out) if args.out else Path.cwd() / fname
+    out.write_bytes(data)
+    print(f"wrote {out}  ({len(data)} bytes, kind={args.kind})")
+    return 0
+
+
 def _safe(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in str(name))
 
@@ -175,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--console-url", default=None, help="override S1_CONSOLE_URL")
     r.add_argument("--max-attempts", type=int, default=4, help="transient retries per slice")
     r.add_argument("--no-subdivide", action="store_true", help="disable adaptive sub-slicing")
+    r.add_argument("--no-cache", action="store_true", help="disable the content-addressed slice cache")
     r.add_argument("--priority", default="LOW", choices=["LOW", "HIGH"])
     r.add_argument("--var", action="append", help="extra template var KEY=VALUE (repeatable)")
     r.add_argument("--mock", action="store_true", help="run offline against the fake backend")
@@ -185,6 +208,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", help="show coverage for an existing run")
     s.add_argument("--run-dir", required=True, help="path to a run directory")
     s.set_defaults(func=cmd_status)
+
+    e = sub.add_parser("export", help="zip a run's outputs (logs/results/all)")
+    e.add_argument("--run-dir", required=True, help="path to a run directory")
+    e.add_argument("--kind", default="results", choices=["logs", "results", "all"])
+    e.add_argument("--out", default=None, help="output .zip path (default: cwd)")
+    e.set_defaults(func=cmd_export)
     return p
 
 

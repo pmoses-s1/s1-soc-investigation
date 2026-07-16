@@ -1,5 +1,7 @@
-# Runtime deps. The engine core (slicing, ledger, merge, rate limiter) uses only
-# the standard library; requests is needed for live runs and pyyaml for YAML
-# catalogs. Offline --mock runs and the test suite need neither.
+# Runtime deps. The engine core (slicing, ledger, merge, rate limiter, cache) uses
+# only the standard library; requests is needed for live runs, pyyaml for YAML
+# catalogs, and openpyxl for the .xlsx workbook export. Offline --mock runs and the
+# test suite need none of them (the workbook step degrades gracefully without openpyxl).
 requests>=2.31
 PyYAML>=6.0
+openpyxl>=3.1

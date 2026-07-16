@@ -5,80 +5,107 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>S1 SOC Investigation</title>
 <style>
+  /* Neumorphic lavender theme, matched to s1-ueba-deployer */
   :root{
-    --bg:#0d0b14; --panel:#161320; --panel2:#1e1a2b; --line:#2c2740;
-    --text:#e8e6f0; --muted:#9a93b3; --accent:#8b5cf6; --accent2:#a855f7;
-    --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --info:#60a5fa;
+    --bg:#e7e5f4; --surface:#e8e6f5; --panel2:#ecebf8;
+    --lite:#ffffff; --dark:#c3bfe0;
+    --line:#d9d6ee; --line2:#cbc7e6;
+    --txt:#332d5c; --mut:#8b86ae; --label:#4f4a7d; --hint:#635d8c;
+    --pur:#7b5cf6; --pur2:#6743e6; --indigo:#5647d6; --mag:#a06bf2;
+    --grn:#1c9e77; --amb:#c1841a; --red:#e0526a; --cyan:#3187a6;
+    --nm-out:-6px -6px 13px var(--lite),6px 6px 15px var(--dark);
+    --nm-out-sm:-3px -3px 7px var(--lite),3px 3px 8px var(--dark);
+    --nm-in:inset 3px 3px 7px var(--dark),inset -3px -3px 7px var(--lite);
+    --nm-in-sm:inset 2px 2px 5px var(--dark),inset -2px -2px 5px var(--lite);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);
-    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  header{display:flex;align-items:center;gap:12px;padding:14px 22px;
-    background:linear-gradient(90deg,#1a1030,#0d0b14);border-bottom:1px solid var(--line)}
-  header .logo{width:26px;height:26px;border-radius:6px;
-    background:linear-gradient(135deg,var(--accent),var(--accent2));
-    box-shadow:0 0 16px rgba(139,92,246,.5)}
-  header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
-  header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);
-    padding:2px 8px;border-radius:20px}
-  header .conn{margin-left:auto;font-size:12px;color:var(--muted)}
-  header .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
-    background:var(--bad);margin-right:6px;vertical-align:middle}
-  header .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
-  .wrap{display:grid;grid-template-columns:400px 1fr;gap:18px;padding:18px 22px;
-    max-width:1400px;margin:0 auto}
+  body{margin:0;background:radial-gradient(1100px 620px at 50% -8%,#efedfb 0,var(--bg) 58%);
+    color:var(--txt);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    min-height:100vh}
+  header{display:flex;align-items:center;gap:16px;padding:18px 28px;background:var(--surface);
+    box-shadow:0 6px 18px rgba(123,92,246,.10);position:relative;z-index:2}
+  header .logo{width:40px;height:40px;border-radius:13px;background:linear-gradient(135deg,var(--pur),var(--mag));
+    box-shadow:0 6px 16px rgba(123,92,246,.42),var(--nm-out-sm)}
+  header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px;color:var(--txt)}
+  header .sub{color:var(--hint);font-size:12.5px}
+  header .conn{margin-left:auto;font-size:12px;color:var(--mut);border-radius:20px;padding:8px 16px;
+    background:var(--surface);box-shadow:var(--nm-out-sm);font-weight:600}
+  header .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--red);margin-right:7px}
+  header .dot.on{background:var(--grn);box-shadow:0 0 8px var(--grn)}
+  .wrap{display:grid;grid-template-columns:430px 1fr;gap:22px;padding:24px 28px;max-width:1480px;margin:0 auto}
   @media(max-width:900px){.wrap{grid-template-columns:1fr}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
-    padding:16px 16px 18px;margin-bottom:16px}
-  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;
-    color:var(--muted);margin:0 0 12px}
-  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
-  input,select,textarea{width:100%;background:var(--panel2);color:var(--text);
-    border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:13px;
-    font-family:inherit}
-  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
-  textarea{resize:vertical;min-height:58px;font-family:ui-monospace,Menlo,monospace}
-  .row{display:flex;gap:10px}.row>*{flex:1}
-  .chk{display:flex;align-items:center;gap:8px;margin-top:12px}
-  .chk input{width:auto}
-  .chk label{margin:0}
-  button{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
-    border:none;border-radius:8px;padding:11px 14px;font-size:13px;font-weight:600;
-    cursor:pointer;width:100%;margin-top:14px}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  button.ghost{background:var(--panel2);border:1px solid var(--line)}
-  .hint{font-size:11px;color:var(--muted);margin-top:6px}
-  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;
-    font-weight:700;letter-spacing:.4px}
-  .badge.ok{background:rgba(52,211,153,.15);color:var(--ok);border:1px solid rgba(52,211,153,.4)}
-  .badge.bad{background:rgba(248,113,113,.15);color:var(--bad);border:1px solid rgba(248,113,113,.4)}
-  .badge.run{background:rgba(96,165,250,.15);color:var(--info);border:1px solid rgba(96,165,250,.4)}
-  .badge.warn{background:rgba(251,191,36,.15);color:var(--warn);border:1px solid rgba(251,191,36,.4)}
-  #log{background:#0a0812;border:1px solid var(--line);border-radius:8px;
-    height:340px;overflow:auto;padding:10px 12px;font:12px/1.55 ui-monospace,Menlo,monospace}
+  .card{background:var(--surface);border-radius:20px;padding:22px 24px;margin-bottom:20px;box-shadow:var(--nm-out)}
+  .card h2{font-size:16px;font-weight:700;margin:0 0 14px;color:var(--txt)}
+  label{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--label);margin:12px 0 5px;font-weight:600}
+  input,select,textarea{width:100%;background:var(--surface);color:var(--txt);border:none;border-radius:12px;
+    padding:11px 13px;font-size:14px;box-shadow:var(--nm-in);-webkit-appearance:none;appearance:none;font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;box-shadow:var(--nm-in),0 0 0 1.5px var(--pur)}
+  ::placeholder{color:#9d98bd}
+  textarea{resize:vertical;min-height:60px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
+  .row{display:flex;gap:12px}.row>*{flex:1}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:12px}.chk input{width:auto;box-shadow:none}.chk label{margin:0}
+  button{background:linear-gradient(135deg,var(--pur),var(--pur2));color:#fff;border:none;border-radius:14px;
+    padding:14px 20px;font-size:14.5px;font-weight:700;cursor:pointer;width:100%;margin-top:16px;
+    box-shadow:0 8px 22px rgba(123,92,246,.4),var(--nm-out-sm);transition:transform .15s,filter .15s}
+  button:hover{filter:brightness(1.06);transform:translateY(-1px)}
+  button:active{box-shadow:var(--nm-in);transform:none}
+  button:disabled{opacity:.55;cursor:not-allowed;box-shadow:none;filter:none;transform:none}
+  button.ghost{background:var(--surface);color:var(--txt);border-radius:12px;padding:12px 18px;
+    box-shadow:var(--nm-out-sm);font-weight:600}
+  button.ghost:hover{color:var(--pur2);filter:none}
+  button.ghost:active{box-shadow:var(--nm-in-sm)}
+  button.sm{width:auto;margin-top:0;padding:9px 14px;font-size:12.5px}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .hint{font-size:12px;color:var(--hint);margin-top:6px}
+  .badge{display:inline-block;padding:6px 14px;border-radius:20px;font-size:12px;font-weight:700;
+    background:var(--surface);box-shadow:var(--nm-out-sm)}
+  .badge.ok{color:var(--grn)} .badge.bad{color:var(--red)} .badge.run{color:var(--indigo)} .badge.warn{color:var(--amb)}
+  #log{background:#e0deef;border-radius:14px;height:330px;overflow:auto;padding:12px 14px;
+    box-shadow:var(--nm-in);font:12px/1.6 ui-monospace,Menlo,monospace}
   .le{white-space:pre-wrap;word-break:break-word;padding:1px 0}
-  .le .t{color:var(--muted)}
-  .le.ok .m{color:var(--ok)} .le.fail .m{color:var(--bad)} .le.perm .m{color:var(--bad)}
-  .le.warn .m{color:var(--warn)} .le.info .m{color:var(--info)}
-  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
-  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
-  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  .le .t{color:var(--mut)}
+  .le.ok .m{color:var(--grn)} .le.cache .m{color:var(--pur2)} .le.fail .m{color:var(--red)}
+  .le.perm .m{color:var(--red)} .le.warn .m{color:var(--amb)} .le.info .m{color:var(--indigo)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
+  th,td{text-align:left;padding:8px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
   td.n{text-align:right;font-variant-numeric:tabular-nums}
-  .pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px}
-  .pill.pass{background:rgba(52,211,153,.15);color:var(--ok)}
-  .pill.failed{background:rgba(248,113,113,.15);color:var(--bad)}
-  .pill.incomplete{background:rgba(251,191,36,.15);color:var(--warn)}
-  .stat{display:inline-block;margin-right:16px;font-size:12px;color:var(--muted)}
-  .stat b{color:var(--text);font-variant-numeric:tabular-nums}
-  .muted{color:var(--muted)}
-  .kv{font-size:12px;color:var(--muted);margin:2px 0}
+  .pill{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;
+    background:var(--surface);box-shadow:var(--nm-out-sm)}
+  .pill.pass,.pill.valid{color:var(--grn)} .pill.failed,.pill.invalid{color:var(--red)}
+  .pill.incomplete,.pill.unknown{color:var(--amb)}
+  .stat{display:inline-block;margin-right:16px;font-size:12.5px;color:var(--mut)}
+  .stat b{color:var(--txt);font-variant-numeric:tabular-nums}
+  .muted{color:var(--mut)} .kv{font-size:12px;color:var(--hint);margin:3px 0}
+  /* help tooltip */
+  .help{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;
+    background:var(--surface);box-shadow:var(--nm-out-sm);color:var(--label);font-size:10.5px;font-weight:800;
+    cursor:help;position:relative}
+  .help:hover{color:var(--pur2)}
+  .help::after{content:attr(data-tip);position:absolute;left:50%;bottom:calc(100% + 10px);
+    transform:translateX(-50%) scale(.97);width:250px;background:var(--surface);color:var(--txt);
+    padding:11px 13px;border-radius:12px;box-shadow:var(--nm-out);font-size:12px;font-weight:500;line-height:1.5;
+    opacity:0;pointer-events:none;transition:opacity .15s,transform .15s;z-index:60}
+  .help:hover::after{opacity:1;transform:translateX(-50%) scale(1)}
+  /* modal */
+  .modal{display:none;position:fixed;inset:0;background:rgba(51,45,92,.35);backdrop-filter:blur(2px);
+    z-index:100;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+  .modal.open{display:flex}
+  .modal .box{background:var(--surface);border-radius:22px;width:min(880px,100%);padding:26px 28px;
+    box-shadow:var(--nm-out)}
+  .modal h3{margin:0 0 4px;font-size:17px}
+  .modal .x{float:right;cursor:pointer;color:var(--mut);font-size:22px;line-height:1}
+  #catContent{min-height:330px}
+  #valOut{margin-top:12px;max-height:230px;overflow:auto}
 </style>
 </head>
 <body>
 <header>
   <div class="logo"></div>
-  <h1>SentinelOne SOC Investigation</h1>
-  <span class="tag">execution engine</span>
+  <div>
+    <h1>SentinelOne SOC Investigation</h1>
+    <div class="sub">Long-lookback query execution engine for Singularity Data Lake</div>
+  </div>
   <span class="conn"><span id="cdot" class="dot"></span><span id="cstat">not connected</span></span>
 </header>
 
@@ -87,14 +114,13 @@
     <!-- Connect -->
     <div class="card">
       <h2>Connect</h2>
-      <label>Console URL</label>
+      <label>Console URL <span class="help" data-tip="Your tenant's console host for the LRQ v2 API, e.g. https://your-tenant.sentinelone.net. This is NOT the xdr.* V1 address.">?</span></label>
       <input id="console" placeholder="https://your-tenant.sentinelone.net">
-      <label>Service-user tokens (one per line, or comma-separated)</label>
+      <label>Service-user tokens <span class="help" data-tip="One or more console service-user JWTs. Put one per line to round-robin across identities, which multiplies the ~3 requests/sec per-user limit. Tokens stay on the server and are never sent back to the browser.">?</span></label>
       <textarea id="tokens" placeholder="JWT for service user 1&#10;JWT for service user 2 (round-robin)"></textarea>
-      <div class="hint">Tokens stay in the server process, never sent back to the browser.</div>
       <div class="row">
-        <div><label>Per-token rate (rps)</label><input id="rps" value="2.5"></div>
-        <div><label>Account IDs (optional)</label><input id="accts" placeholder="comma-separated"></div>
+        <div><label>Rate (rps) <span class="help" data-tip="Requests per second per token. Keep at or below ~2.5 to stay under the 3 rps per-user cap. Every launch, poll, and cancel counts against it.">?</span></label><input id="rps" value="2.5"></div>
+        <div><label>Account IDs <span class="help" data-tip="Optional, comma-separated. Scopes the query to these accounts (sets tenant=false). Use this if a tenant-wide query returns zero rows on a multi-account tenant.">?</span></label><input id="accts" placeholder="optional"></div>
       </div>
       <button id="btnConnect">Connect</button>
     </div>
@@ -103,178 +129,253 @@
     <div class="card">
       <h2>Run investigation</h2>
       <div class="row">
-        <div><label>Case ID</label><input id="case" placeholder="CASE-1234"></div>
-        <div><label>Entity</label><input id="entity" placeholder="user@corp.com"></div>
+        <div><label>Case ID <span class="help" data-tip="Your case reference. Becomes the output subfolder name.">?</span></label><input id="case" placeholder="CASE-1234"></div>
+        <div><label>Entity <span class="help" data-tip="The subject of the investigation: user email, username, host, or IP. Substituted into {{entity}} in every query.">?</span></label><input id="entity" placeholder="user@corp.com"></div>
       </div>
-      <label>Query catalog</label>
+      <label>Query catalog <span class="help" data-tip="The standard query set to run for this case. Use Edit / New / Import / Validate to manage it.">?</span></label>
       <select id="catalog"></select>
-      <div class="row">
-        <div><label>Lookback (days)</label><input id="lookback" type="number" value="90"></div>
-        <div><label>Slice size (days)</label><input id="sliceDays" type="number" value="1"></div>
+      <div class="btnrow">
+        <button class="ghost sm" id="btnCatEdit">Edit</button>
+        <button class="ghost sm" id="btnCatNew">New</button>
+        <button class="ghost sm" id="btnCatImport">Import</button>
+        <button class="ghost sm" id="btnCatExport">Export</button>
+        <button class="ghost sm" id="btnCatValidate">Validate vs SDL</button>
       </div>
-      <label>Output folder</label>
+      <div class="row" style="margin-top:8px">
+        <div><label>Lookback (days) <span class="help" data-tip="How many days back to investigate. 90+ is typical for insider-threat and forensic cases.">?</span></label><input id="lookback" type="number" value="90"></div>
+        <div><label>Slice size (days) <span class="help" data-tip="Days per slice. Smaller slices are more resilient and cache better. 1 day is the recommended default.">?</span></label><input id="sliceDays" type="number" value="1"></div>
+      </div>
+      <label>Output folder <span class="help" data-tip="Where results, logs, the ledger, and the .xlsx workbook are written. Blank uses the default base (the mounted /data folder in Docker).">?</span></label>
       <input id="outputDir" placeholder="(default output base)">
       <div class="hint" id="outHint"></div>
       <div class="row">
-        <div><label>Worker pool</label><input id="pool" type="number" placeholder="tokens x 3"></div>
-        <div><label>Max attempts</label><input id="maxAttempts" type="number" value="4"></div>
+        <div><label>Worker pool <span class="help" data-tip="How many slices run at once. Blank = number of tokens x 3. The engine auto-tunes this down if the backend returns rate-limit errors, and back up on sustained success.">?</span></label><input id="pool" type="number" placeholder="tokens x 3"></div>
+        <div><label>Max attempts <span class="help" data-tip="Transient retries per slice before it is subdivided or marked failed. Query syntax errors are never retried.">?</span></label><input id="maxAttempts" type="number" value="4"></div>
       </div>
       <div class="row">
-        <div>
-          <label>Priority</label>
-          <select id="priority"><option>LOW</option><option>HIGH</option></select>
-        </div>
-        <div class="chk" style="align-items:flex-end;padding-bottom:8px">
-          <input id="subdivide" type="checkbox" checked><label>Adaptive sub-slice</label>
+        <div><label>Priority <span class="help" data-tip="LRQ queue priority. LOW is cheaper and fine for background batches; HIGH for urgent interactive work.">?</span></label>
+          <select id="priority"><option>LOW</option><option>HIGH</option></select></div>
+        <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:6px;padding-bottom:4px">
+          <div class="chk"><input id="subdivide" type="checkbox" checked><label>Adaptive sub-slice <span class="help" data-tip="If a slice keeps timing out, split it into smaller windows and retry those instead of failing the whole day.">?</span></label></div>
+          <div class="chk"><input id="useCache" type="checkbox" checked><label>Use cache <span class="help" data-tip="Reuse results for immutable past days from previous runs, so only new or changed days re-run. Today's partial day always re-runs.">?</span></label></div>
         </div>
       </div>
-      <div class="chk"><input id="mock" type="checkbox"><label>Dry run (offline mock backend, no tenant)</label></div>
+      <div class="chk"><input id="mock" type="checkbox"><label>Dry run (offline mock) <span class="help" data-tip="Run offline against a built-in fake backend to try the whole flow without a tenant or credentials.">?</span></label></div>
       <button id="btnRun">Start investigation</button>
     </div>
   </div>
 
   <div>
-    <!-- Verification -->
     <div class="card">
       <h2>Verification</h2>
       <div id="verdict"><span class="muted">Run an investigation to see per-query verification.</span></div>
-      <div id="stats" style="margin-top:10px"></div>
+      <div id="downloads" class="btnrow"></div>
+      <div id="stats" style="margin-top:12px"></div>
       <div id="vtable"></div>
     </div>
-
-    <!-- Activity -->
     <div class="card">
-      <h2>Activity log <span id="runlabel" class="muted"></span></h2>
+      <h2>Activity log <span id="runlabel" class="muted" style="font-weight:400;font-size:12px"></span></h2>
       <div id="log"></div>
     </div>
+  </div>
+</div>
+
+<!-- Catalog editor modal -->
+<div class="modal" id="catModal">
+  <div class="box">
+    <span class="x" id="catClose">&times;</span>
+    <h3>Query catalog</h3>
+    <div class="hint">A catalog is a name plus a list of queries. Each query needs an id, title, pq (the PowerQuery), and a merge block. {{entity}} is filled in per run.</div>
+    <label>Filename <span class="help" data-tip="Saved into your catalogs folder, which persists on the output volume. Use a .yaml or .json extension.">?</span></label>
+    <input id="catFile" placeholder="my_catalog.yaml">
+    <label>Catalog content</label>
+    <textarea id="catContent" spellcheck="false"></textarea>
+    <div class="btnrow">
+      <button class="ghost sm" id="btnAddQuery">+ Add query template</button>
+      <button class="ghost sm" id="btnModalValidate">Validate vs SDL</button>
+      <input type="file" id="catFileInput" accept=".yaml,.yml,.json" style="display:none">
+    </div>
+    <div id="valOut"></div>
+    <button id="btnCatSave">Save catalog</button>
   </div>
 </div>
 
 <script>
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 function hdrs(){const h={"Content-Type":"application/json"}; if(TOKEN)h["X-Auth-Token"]=TOKEN; return h;}
-async function apiGet(path){const r=await fetch(path,{headers:hdrs()}); return r.json();}
-async function apiPost(path,body){const r=await fetch(path,{method:"POST",headers:hdrs(),body:JSON.stringify(body||{})}); return r.json();}
+function tq(extra){return TOKEN?("&token="+encodeURIComponent(TOKEN)+(extra||"")):(extra||"");}
+async function apiGet(p){return (await fetch(p,{headers:hdrs()})).json();}
+async function apiPost(p,b){return (await fetch(p,{method:"POST",headers:hdrs(),body:JSON.stringify(b||{})})).json();}
 const $=id=>document.getElementById(id);
 
-let CATALOGS=[];
+let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
 
 async function loadConfig(){
   const c=await apiGet("/api/config");
   $("outHint").textContent="Default base: "+c.output_base;
   CATALOGS=c.catalogs||[];
-  const sel=$("catalog"); sel.innerHTML="";
+  const sel=$("catalog"); const prev=sel.value; sel.innerHTML="";
   CATALOGS.forEach(cat=>{
-    const o=document.createElement("option");
-    o.value=cat.path;
-    o.textContent=cat.error? (cat.name+" (parse error)") : `${cat.name}  (${cat.queries} queries)`;
+    const o=document.createElement("option"); o.value=cat.path;
+    o.textContent=(cat.error?cat.name+" (parse error)":`${cat.name} (${cat.queries} queries)`)+(cat.editable?"":" [bundled]");
     sel.appendChild(o);
   });
-  setConn(c.creds_ok, c.console_url, c.num_tokens);
-  if(c.console_url && !$("console").value) $("console").value=c.console_url;
+  if(prev)sel.value=prev;
+  setConn(c.creds_ok,c.console_url,c.num_tokens);
+  if(c.console_url&&!$("console").value)$("console").value=c.console_url;
 }
 function setConn(ok,url,n){
   $("cdot").className="dot"+(ok?" on":"");
-  $("cstat").textContent= ok ? `connected · ${n} token${n==1?"":"s"}` : "not connected";
+  $("cstat").textContent=ok?`connected · ${n} token${n==1?"":"s"}`:"not connected";
 }
+function curCat(){return CATALOGS.find(c=>c.path===$("catalog").value);}
 
 $("btnConnect").onclick=async()=>{
-  const body={console_url:$("console").value.trim(),tokens:$("tokens").value.trim(),
-    rps:parseFloat($("rps").value)||2.5,account_ids:$("accts").value.trim()};
-  const r=await apiPost("/api/connect",body);
-  setConn(r.creds_ok,r.console_url,r.num_tokens);
-  $("tokens").value=""; // never keep tokens in the DOM
+  const r=await apiPost("/api/connect",{console_url:$("console").value.trim(),
+    tokens:$("tokens").value.trim(),rps:parseFloat($("rps").value)||2.5,account_ids:$("accts").value.trim()});
+  setConn(r.creds_ok,r.console_url,r.num_tokens); $("tokens").value="";
 };
 
-let POLL=null, LASTSEQ=0, CURRENT=null;
-
 $("btnRun").onclick=async()=>{
-  const body={
-    case:$("case").value.trim()||"case", entity:$("entity").value.trim(),
-    catalog:$("catalog").value, lookback:parseInt($("lookback").value)||90,
-    sliceDays:parseInt($("sliceDays").value)||1, outputDir:$("outputDir").value.trim(),
-    pool:parseInt($("pool").value)||null, maxAttempts:parseInt($("maxAttempts").value)||4,
-    subdivide:$("subdivide").checked, priority:$("priority").value,
-    mock:$("mock").checked, mockThrottle:0
-  };
+  const body={case:$("case").value.trim()||"case",entity:$("entity").value.trim(),catalog:$("catalog").value,
+    lookback:parseInt($("lookback").value)||90,sliceDays:parseInt($("sliceDays").value)||1,
+    outputDir:$("outputDir").value.trim(),pool:parseInt($("pool").value)||null,
+    maxAttempts:parseInt($("maxAttempts").value)||4,subdivide:$("subdivide").checked,
+    useCache:$("useCache").checked,priority:$("priority").value,mock:$("mock").checked,mockThrottle:0};
   if(!body.entity){alert("Entity is required");return;}
   const r=await apiPost("/api/run",body);
   if(r.error){alert(r.error);return;}
   CURRENT=r.run_id; LASTSEQ=0;
-  $("log").innerHTML=""; $("vtable").innerHTML=""; $("stats").innerHTML="";
+  $("log").innerHTML=""; $("vtable").innerHTML=""; $("stats").innerHTML=""; $("downloads").innerHTML="";
   $("runlabel").textContent="· "+r.run_id;
   $("verdict").innerHTML='<span class="badge run">RUNNING</span> <span class="muted">'+r.run_dir+'</span>';
   $("btnRun").disabled=true;
-  if(POLL)clearInterval(POLL);
-  POLL=setInterval(poll,1000); poll();
+  if(POLL)clearInterval(POLL); POLL=setInterval(poll,1000); poll();
 };
 
 function addLine(ev){
   const box=$("log");
-  const cls={slice_done:"ok",slice_failed:"fail",permanent:"perm",subdivided:"warn",
-    verification:"info",resume:"info",planned:"info",finalized:"info",error:"fail"}[ev.event]||"";
+  const cls={slice_done:"ok",slice_cached:"cache",slice_failed:"fail",permanent:"perm",subdivided:"warn",
+    verification:"info",resume:"info",planned:"info",finalized:"info",workbook:"info",warning:"warn",error:"fail"}[ev.event]||"";
   const t=new Date((ev.ts||0)*1000).toLocaleTimeString();
-  let msg=fmt(ev);
-  const div=document.createElement("div");
-  div.className="le "+cls;
-  div.innerHTML=`<span class="t">${t}</span> <span class="m">${msg}</span>`;
-  box.appendChild(div);
-  box.scrollTop=box.scrollHeight;
+  const div=document.createElement("div"); div.className="le "+cls;
+  div.innerHTML=`<span class="t">${t}</span> <span class="m">${fmt(ev)}</span>`;
+  box.appendChild(div); box.scrollTop=box.scrollHeight;
 }
-function fmt(e){
-  switch(e.event){
-    case"planned":return `planned ${e.jobs} jobs (${e.queries} queries × ${e.slices} slices)`;
-    case"resume":return `resume: reset ${e.reset_in_flight} stale in-flight → pending`;
-    case"slice_done":return `OK  ${e.query} [${e.slice}] rows=${e.rows} match=${e.match_count} ${e.elapsed_s}s ${e.client} gov=${e.gov_limit}`;
-    case"slice_failed":return `FAIL ${e.query} [${e.slice}] ${e.error||""}`;
-    case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
-    case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
-    case"finalized":return `finalized (complete=${e.complete})`;
-    case"verification":return `verification: ${e.passed?"PASS":"ATTENTION"} ${e.passed_queries}/${e.total_queries} queries`;
-    case"error":return `ERROR ${e.error||""}`;
-    default:return JSON.stringify(e);
-  }
-}
+function fmt(e){switch(e.event){
+  case"planned":return `planned ${e.jobs} jobs (${e.queries} queries × ${e.slices} slices)`;
+  case"resume":return `resume: reset ${e.reset_in_flight} stale in-flight → pending`;
+  case"slice_done":return `OK  ${e.query} [${e.slice}] rows=${e.rows} match=${e.match_count} ${e.elapsed_s}s ${e.client} gov=${e.gov_limit}`;
+  case"slice_cached":return `CACHE ${e.query} [${e.slice}] rows=${e.rows} (served from cache)`;
+  case"slice_failed":return `FAIL ${e.query} [${e.slice}] ${e.error||""}`;
+  case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
+  case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
+  case"workbook":return `workbook → ${e.path}`;
+  case"warning":return `warn: ${e.msg}`;
+  case"finalized":return `finalized (complete=${e.complete})`;
+  case"verification":return `verification: ${e.passed?"PASS":"ATTENTION"} ${e.passed_queries}/${e.total_queries}`;
+  case"error":return `ERROR ${e.error||""}`; default:return JSON.stringify(e);}}
 
 async function poll(){
   if(!CURRENT)return;
   const a=await apiGet(`/api/activity?runId=${encodeURIComponent(CURRENT)}&since=${LASTSEQ}`);
   (a.events||[]).forEach(ev=>{LASTSEQ=Math.max(LASTSEQ,ev.seq);addLine(ev);});
-  if(a.status && a.status!=="running"){
+  if(a.status&&a.status!=="running"){
     clearInterval(POLL);POLL=null;$("btnRun").disabled=false;
-    const s=await apiGet(`/api/status?runId=${encodeURIComponent(CURRENT)}`);
-    renderVerification(s);
+    renderVerification(await apiGet(`/api/status?runId=${encodeURIComponent(CURRENT)}`));
   }
 }
 
 function renderVerification(s){
-  if(s.status==="error"){
-    $("verdict").innerHTML='<span class="badge bad">ERROR</span> <span class="muted">'+(s.error||"")+'</span>';
-    return;
-  }
+  if(s.status==="error"){$("verdict").innerHTML='<span class="badge bad">ERROR</span> <span class="muted">'+(s.error||"")+'</span>';return;}
   const v=s.verification;
   if(!v){$("verdict").innerHTML='<span class="badge warn">'+s.status.toUpperCase()+'</span>';return;}
-  const badge = v.passed?'<span class="badge ok">PASS — all queries completed</span>'
-                        :'<span class="badge bad">ATTENTION — incomplete</span>';
-  $("verdict").innerHTML=badge+` <span class="muted">${v.passed_queries}/${v.total_queries} queries passed</span>`;
+  $("verdict").innerHTML=(v.passed?'<span class="badge ok">PASS — all queries completed</span>'
+    :'<span class="badge bad">ATTENTION — incomplete</span>')+` <span class="muted">${v.passed_queries}/${v.total_queries} queries passed</span>`;
+  const rid=encodeURIComponent(CURRENT);
+  $("downloads").innerHTML=
+    `<a href="/api/activity_log?runId=${rid}${tq()}"><button class="ghost sm">↓ Activity log (.jsonl)</button></a>`+
+    `<a href="/api/export?runId=${rid}&kind=results${tq()}"><button class="ghost sm">↓ Results (.zip)</button></a>`+
+    `<a href="/api/export?runId=${rid}&kind=all${tq()}"><button class="ghost sm">↓ Everything (.zip)</button></a>`;
   const st=s.stats||{};
-  $("stats").innerHTML=Object.entries({done:st.done,failed:st.failed,permanent:st.permanent,
-    retries:st.retries,throttles:st.throttles,subdivided:st.subdivided})
-    .filter(([k,v])=>v!==undefined).map(([k,v])=>`<span class="stat">${k} <b>${v}</b></span>`).join("");
-  let html='<table><thead><tr><th>Query</th><th>Status</th><th class="n">Done</th>'+
-    '<th class="n">Fail</th><th class="n">Perm</th><th class="n">Pend</th><th class="n">Rows</th></tr></thead><tbody>';
-  v.queries.forEach(q=>{
-    html+=`<tr><td>${q.query_id}<div class="kv">${q.title||""}</div></td>`+
-      `<td><span class="pill ${q.status}">${q.status}</span></td>`+
-      `<td class="n">${q.done}</td><td class="n">${q.failed}</td><td class="n">${q.permanent}</td>`+
-      `<td class="n">${q.pending+q.in_flight}</td><td class="n">${q.result_rows}</td></tr>`;
-    if(q.warnings&&q.warnings.length)
-      html+=`<tr><td colspan="7" class="kv">⚠ ${q.warnings.join("; ")}</td></tr>`;
-  });
-  html+='</tbody></table>';
-  html+=`<div class="kv" style="margin-top:8px">Results, ledger, activity log and manifest written to: ${s.run_dir}</div>`;
-  $("vtable").innerHTML=html;
+  $("stats").innerHTML=Object.entries({done:st.done,cached:st.cached,failed:st.failed,permanent:st.permanent,
+    retries:st.retries,throttles:st.throttles,subdivided:st.subdivided}).filter(([k,x])=>x!==undefined)
+    .map(([k,x])=>`<span class="stat">${k} <b>${x}</b></span>`).join("");
+  let h='<table><thead><tr><th>Query</th><th>Status</th><th class="n">Done</th><th class="n">Fail</th>'+
+    '<th class="n">Perm</th><th class="n">Pend</th><th class="n">Rows</th></tr></thead><tbody>';
+  v.queries.forEach(q=>{h+=`<tr><td>${q.query_id}<div class="kv">${q.title||""}</div></td>`+
+    `<td><span class="pill ${q.status}">${q.status}</span></td><td class="n">${q.done}</td>`+
+    `<td class="n">${q.failed}</td><td class="n">${q.permanent}</td><td class="n">${q.pending+q.in_flight}</td>`+
+    `<td class="n">${q.result_rows}</td></tr>`;
+    if(q.warnings&&q.warnings.length)h+=`<tr><td colspan="7" class="kv">⚠ ${q.warnings.join("; ")}</td></tr>`;});
+  h+='</tbody></table>';
+  if(s.workbook)h+=`<div class="kv" style="margin-top:8px">Workbook: ${s.workbook}</div>`;
+  h+=`<div class="kv">All outputs written to: ${s.run_dir}</div>`;
+  $("vtable").innerHTML=h;
 }
+
+/* ---------- catalog editor ---------- */
+const QUERY_TEMPLATE=
+`  - id: new_query
+    title: "Describe what this finds"
+    pq: >
+      dataSource.name='Windows Event Logs'
+      winEventLog.description contains:anycase("{{entity}}")
+      | group hits=count() by event_day=formatTimestamp("%Y-%m-%d", event.time)
+      | sort event_day
+    merge:
+      kind: aggregate
+      key_cols: [event_day]
+      sum_cols: [hits]
+`;
+function openModal(){$("catModal").classList.add("open");$("valOut").innerHTML="";}
+$("catClose").onclick=()=>$("catModal").classList.remove("open");
+$("catModal").onclick=e=>{if(e.target.id==="catModal")$("catModal").classList.remove("open");};
+
+$("btnCatEdit").onclick=async()=>{
+  const c=curCat(); if(!c)return;
+  const d=await apiGet("/api/catalog?path="+encodeURIComponent(c.path));
+  $("catFile").value=d.editable?d.file:("copy_of_"+d.file);
+  $("catContent").value=d.content;
+  if(!d.editable)$("valOut").innerHTML='<div class="kv">This is a bundled catalog. Saving will create an editable copy in your catalogs folder.</div>';
+  openModal();
+};
+$("btnCatNew").onclick=()=>{
+  $("catFile").value="my_catalog.yaml";
+  $("catContent").value="name: my_catalog\n\nqueries:\n"+QUERY_TEMPLATE;
+  openModal();
+};
+$("btnAddQuery").onclick=()=>{$("catContent").value=$("catContent").value.replace(/\s*$/,"\n")+QUERY_TEMPLATE;};
+$("btnCatImport").onclick=()=>$("catFileInput").click();
+$("catFileInput").onchange=e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader(); r.onload=()=>{$("catFile").value=f.name;$("catContent").value=r.result;openModal();}; r.readAsText(f);
+};
+$("btnCatExport").onclick=()=>{const c=curCat(); if(c)window.location="/api/catalog_export?path="+encodeURIComponent(c.path)+tq();};
+$("btnCatSave").onclick=async()=>{
+  const r=await apiPost("/api/catalog_save",{filename:$("catFile").value.trim(),content:$("catContent").value});
+  if(r.error){$("valOut").innerHTML='<div class="kv" style="color:var(--red)">Save failed: '+r.error+'</div>';return;}
+  $("valOut").innerHTML='<div class="kv" style="color:var(--grn)">Saved '+r.file+' ('+r.queries+' queries)</div>';
+  await loadConfig(); $("catalog").value=r.path;
+};
+async function runValidate(payload,target){
+  target.innerHTML='<div class="kv">Validating against SDL…</div>';
+  const r=await apiPost("/api/validate",payload);
+  if(r.error){target.innerHTML='<div class="kv" style="color:var(--red)">'+r.error+'</div>';return;}
+  let h='<table><thead><tr><th>Query</th><th>Result</th><th>Detail</th></tr></thead><tbody>';
+  r.results.forEach(x=>{h+=`<tr><td>${x.query_id}</td><td><span class="pill ${x.status}">${x.status}</span></td>`+
+    `<td class="kv">${x.error||("rows="+(x.rows??"")+" match="+(x.match_count??""))}</td></tr>`;});
+  h+='</tbody></table>';
+  target.innerHTML=(r.ok?'<div class="kv" style="color:var(--grn)">All queries accepted by SDL.</div>':
+    '<div class="kv" style="color:var(--amb)">Some queries need attention.</div>')+h;
+}
+$("btnModalValidate").onclick=()=>runValidate({content:$("catContent").value,mock:$("mock").checked},$("valOut"));
+$("btnCatValidate").onclick=async()=>{
+  const c=curCat(); if(!c)return;
+  $("verdict").innerHTML='<span class="badge run">VALIDATING</span>';
+  await runValidate({catalog:c.path,mock:$("mock").checked},$("vtable"));
+  $("verdict").innerHTML='<span class="muted">Validation results below (does not run the investigation).</span>';
+};
 
 loadConfig();
 </script>

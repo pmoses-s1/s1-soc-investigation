@@ -1,13 +1,14 @@
 name: Publish Docker image
 
-# Builds the image and publishes it to GitHub Container Registry (GHCR) on version
-# tags (v*) or a manual run. Merges to main do NOT auto-publish, so :latest moves only
-# on a deliberate, reviewed release. Uses the repo's built-in GITHUB_TOKEN.
-#   docker pull ghcr.io/pmoses-s1/s1-soc-investigation:latest
-#   cut a release with:  git tag v0.1.0 && git push origin v0.1.0
+# Builds the image and publishes it to GitHub Container Registry (GHCR) so the app
+# installs in one command. Every push to main refreshes :latest, and version tags
+# (v*) cut an immutable release. Uses the repo's built-in GITHUB_TOKEN.
+#   docker run --rm -p 127.0.0.1:8901:8801 ghcr.io/pmoses-s1/s1-soc-investigation:latest
+#   cut a release with:  git tag v0.2.0 && git push origin v0.2.0
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
   workflow_dispatch:
 

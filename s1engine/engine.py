@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from .activity import ActivityLog
+from .cache import SliceCache
 from .catalog import Catalog, Query
 from .config import EngineConfig
 from .ledger import (Job, Ledger, STATE_DONE, STATE_FAILED, STATE_PERMANENT,
@@ -38,6 +39,7 @@ from .lrq_client import (LRQClient, QuerySyntaxError, RateLimitError,
 from .merge import merge_query_results
 from .rate_limiter import AIMDController, TokenBucket
 from .slicing import Slice, iso_z, slices_for_lookback, subdivide
+from .workbook import build_workbook
 
 
 ProgressFn = Callable[[Dict[str, Any]], None]
@@ -60,11 +62,17 @@ class InvestigationEngine:
                  *, transport: Optional[Transport] = None,
                  pool_size: Optional[int] = None,
                  on_progress: Optional[ProgressFn] = None,
-                 activity: Optional["ActivityLog"] = None):
+                 activity: Optional["ActivityLog"] = None,
+                 cache_dir: Optional[str | Path] = None,
+                 use_cache: bool = True):
         self.config = config
         self.output_root = Path(output_root)
         self.on_progress = on_progress or (lambda e: None)
         self.activity = activity
+        # Phase 2: shared content-addressed cache for immutable past-day slices.
+        self.cache = SliceCache(cache_dir or (self.output_root / ".slice_cache"),
+                                enabled=use_cache)
+        self._cutoff_iso: Optional[str] = None
 
         # One client per token, each with its own rate bucket. A shared transport
         # is used for mock runs; real runs get a pooled RequestsTransport.
@@ -144,12 +152,17 @@ class InvestigationEngine:
             self._emit({"event": "resume", "reset_in_flight": reset})
         ledger.set_run_status(run_id, "running")
 
+        # Phase 2: any slice ending at or before the start of the current UTC day
+        # is immutable and cacheable; today's partial slice is volatile.
+        self._cutoff_iso = iso_z(datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0))
+
         work: "queue.Queue[Optional[Job]]" = queue.Queue()
         pending = ledger.claimable(run_id)
         outstanding = {"n": 0}
         out_lock = threading.Lock()
-        stats = {"done": 0, "failed": 0, "permanent": 0, "throttles": 0,
-                 "retries": 0, "subdivided": 0}
+        stats = {"done": 0, "cached": 0, "failed": 0, "permanent": 0,
+                 "throttles": 0, "retries": 0, "subdivided": 0}
 
         def enqueue(job: Job) -> None:
             with out_lock:
@@ -195,10 +208,33 @@ class InvestigationEngine:
 
         cov = ledger.coverage(run_id)
         ledger.set_run_status(run_id, "complete" if cov["complete"] else "incomplete")
-        return {"stats": stats, "total": total, "coverage": cov}
+        return {"stats": stats, "total": total, "coverage": cov,
+                "cache": self.cache.stats()}
 
     def _process_job(self, job: Job, ledger: Ledger, params: RunParams,
                      stats: Dict[str, int], enqueue: Callable[[Job], None]) -> None:
+        # Phase 2: serve immutable past-day slices from the shared cache without
+        # touching the backend, the rate budget, or the concurrency limit.
+        cacheable = self._cutoff_iso is not None and job.slice_end <= self._cutoff_iso
+        ckey = (self.cache.key(job.pq, job.slice_start, job.slice_end, job.scope)
+                if (cacheable and self.cache.enabled) else None)
+        if ckey:
+            hit = self.cache.get(ckey)
+            if hit is not None:
+                ledger.mark_in_flight(job.job_id)
+                path = self._persist_slice(job, hit["columns"], hit["values"],
+                                           hit.get("match_count", 0),
+                                           hit.get("row_count", len(hit["values"])), 0.0)
+                ledger.mark_done(job.job_id, result_path=str(path),
+                                 match_count=hit.get("match_count", 0),
+                                 row_count=hit.get("row_count", len(hit["values"])),
+                                 cpu_ms=0.0)
+                stats["cached"] += 1
+                self._emit({"event": "slice_cached", "query": job.query_id,
+                            "slice": job.slice_key,
+                            "rows": hit.get("row_count", len(hit["values"]))})
+                return
+
         client = self._next_client()
         with self.governor.slot():
             ledger.mark_in_flight(job.job_id)
@@ -234,10 +270,15 @@ class InvestigationEngine:
 
             # Success.
             self.governor.on_success()
-            path = self._write_slice(job, res)
+            path = self._persist_slice(job, res.columns, res.values,
+                                       res.match_count, res.row_count, res.cpu_ms)
             ledger.mark_done(job.job_id, result_path=str(path),
                              match_count=res.match_count, row_count=res.row_count,
                              cpu_ms=res.cpu_ms, lrq_id=res.lrq_id)
+            if ckey:  # Phase 2: cache this immutable past-day slice for future runs.
+                self.cache.put(ckey, {"columns": res.columns, "values": res.values,
+                                      "match_count": res.match_count,
+                                      "row_count": res.row_count, "cpu_ms": res.cpu_ms})
             stats["done"] += 1
             self._emit({"event": "slice_done", "query": job.query_id,
                               "slice": job.slice_key, "rows": res.row_count,
@@ -288,7 +329,8 @@ class InvestigationEngine:
         return children
 
     # -------------------------------------------------------------- outputs
-    def _write_slice(self, job: Job, res: Any) -> Path:
+    def _persist_slice(self, job: Job, columns: List[str], values: List[List[Any]],
+                       match_count: int, row_count: int, cpu_ms: float) -> Path:
         # output_root is the per-run directory; slices live under it by query.
         d = self.output_root / "slices" / _safe(job.query_id)
         d.mkdir(parents=True, exist_ok=True)
@@ -296,9 +338,8 @@ class InvestigationEngine:
         p.write_text(json.dumps({
             "query_id": job.query_id, "slice_key": job.slice_key,
             "slice_start": job.slice_start, "slice_end": job.slice_end,
-            "columns": res.columns, "values": res.values,
-            "match_count": res.match_count, "row_count": res.row_count,
-            "cpu_ms": res.cpu_ms,
+            "columns": columns, "values": values,
+            "match_count": match_count, "row_count": row_count, "cpu_ms": cpu_ms,
         }))
         return p
 
@@ -353,6 +394,24 @@ class InvestigationEngine:
         self._emit({"event": "finalized", "complete": cov["complete"],
                           "results_dir": str(results_dir)})
         return manifest
+
+    def write_workbook(self, run_id: str, manifest: Dict[str, Any],
+                       verification: Optional[Dict[str, Any]], params: RunParams
+                       ) -> Optional[str]:
+        """Phase 3: build the per-case .xlsx workbook. Optional; never fails a run."""
+        results_dir = self.output_root / "results"
+        out = self.output_root / f"{_safe(params.case_id)}_{run_id}.xlsx"
+        try:
+            path = build_workbook(out, manifest, verification, results_dir)
+        except Exception as e:  # noqa: BLE001
+            self._emit({"event": "warning", "msg": f"workbook export skipped: {e}"})
+            return None
+        if path is None:
+            self._emit({"event": "warning",
+                        "msg": "workbook export skipped (openpyxl not installed)"})
+            return None
+        self._emit({"event": "workbook", "path": str(path)})
+        return str(path)
 
 
 def _safe(name: str) -> str:
