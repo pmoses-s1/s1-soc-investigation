@@ -80,7 +80,8 @@ each run a verification report confirms every slice of every query completed and
 UI. Download the raw activity log, or a zip of the results, from the UI or the API.
 
 **Workbook export.** Each run produces a per-case `.xlsx`: a Summary sheet with the verification verdict
-and coverage, then one sheet per query with its merged results, alongside the CSV/JSON and manifest.
+and coverage, then one sheet per query with its merged results. Each query tab shows the exact
+PowerQuery that produced it at the top. The CSV/JSON results and `manifest.json` also carry the PQ.
 
 **Catalog management.** Edit, add to, import, and export the query catalog from the UI. Saved catalogs
 persist in the output volume. **Validate against SDL** launches each query over a short window to
@@ -95,6 +96,9 @@ confirm the engine accepts it (catching syntax errors) before you run a 90-day i
 4. **Watch and verify.** The activity log streams live; the verification panel shows per-query
    PASS / FAILED / INCOMPLETE and download buttons for the activity log and result zips.
 
+The header shows the active build version (the running image's git sha), so you can confirm which
+build you are on. Once connected, the Connect panel collapses to a summary with an **Edit** button.
+
 ## Credentials
 
 The LRQ v2 API needs your tenant **console host** (`https://your-tenant.sentinelone.net`, not the
@@ -108,12 +112,19 @@ Everything for a run lands under `<output>/<case>/<run_id>/`:
 
 ```
 ledger.db                    durable job ledger (state per query x slice; the resume source of truth)
-activity.jsonl               append-only structured log of every execution event
-slices/<query>/              per-slice results for this run
-results/<query>.csv + .json  merged, reassembled result per query
-<case>_<run_id>.xlsx         workbook: Summary + one sheet per query
-manifest.json                coverage and gaps per query per day, warnings
+activity.jsonl               append-only structured log of every execution event (the raw run trace)
+slices/<query>/<slice>.json  RAW per-slice output from SDL for each day (the raw logs)
+results/<query>.csv + .json  merged, reassembled result per query (also carries the pq used)
+<case>_<run_id>.xlsx         workbook: Summary + one tab per query, each tab showing its PowerQuery
+manifest.json                coverage and gaps per query per day, warnings, and the pq used
 ```
+
+**Where are the raw logs?** The raw, unmerged output SDL returned for each day is in
+`slices/<query_id>/<slice>.json` (columns + values). For row-style queries (a `| columns … | limit N`
+body) these are the raw event rows with every projected field; for aggregate queries they are the
+per-day grouped numbers before merging. Note the LRQ engine returns only the columns your query
+projects, so for full-fidelity event capture use a row-style query rather than an aggregate. The raw
+execution trace (launches, polls, cache hits, retries, verdicts) is `activity.jsonl`.
 
 The shared cache lives at `<output>/.slice_cache/` and is reused across runs.
 
