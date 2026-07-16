@@ -116,26 +116,39 @@ def build_workbook(out_path: Path, manifest: Dict[str, Any],
                 pass
         wsq = wb.create_sheet(_sheet_name(qid, used))
         cols = table["columns"] or ["(no columns)"]
+        span = max(4, len(cols))
+        # Show the PowerQuery that produced this tab at the top.
+        pq = q.get("pq", "")
+        header_row = 1
+        if pq:
+            hdr = wsq.cell(1, 1, "PowerQuery")
+            hdr.font = Font(bold=True)
+            qcell = wsq.cell(2, 1, pq)
+            qcell.alignment = Alignment(wrap_text=True, vertical="top")
+            wsq.merge_cells(start_row=2, start_column=1, end_row=2, end_column=span)
+            wsq.row_dimensions[2].height = 72
+            header_row = 4
         for c, name in enumerate(cols, 1):
-            cell = wsq.cell(1, c, name)
+            cell = wsq.cell(header_row, c, name)
             cell.fill = header_fill
             cell.font = header_font
-        for ri, rowvals in enumerate(table["values"], start=2):
+        for ri, rowvals in enumerate(table["values"], start=header_row + 1):
             for c, val in enumerate(rowvals, 1):
                 wsq.cell(ri, c, val)
-        _autosize(wsq)
-        wsq.freeze_panes = "A2"
+        _autosize(wsq, skip_rows={2})
+        wsq.freeze_panes = wsq.cell(header_row + 1, 1).coordinate
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(out_path)
     return out_path
 
 
-def _autosize(ws) -> None:
+def _autosize(ws, skip_rows=None) -> None:
+    skip_rows = skip_rows or set()
     widths: Dict[int, int] = {}
     for row in ws.iter_rows():
         for cell in row:
-            if cell.value is None:
+            if cell.value is None or cell.row in skip_rows:
                 continue
             widths[cell.column] = max(widths.get(cell.column, 0), len(str(cell.value)))
     for col, w in widths.items():

@@ -352,7 +352,11 @@ class InvestigationEngine:
         by_id = {q.id: q for q in catalog.queries}
 
         for q in catalog.enabled_queries():
-            done_jobs = ledger.jobs_for_query(run_id, q.id, state=STATE_DONE)
+            all_jobs = ledger.jobs_for_query(run_id, q.id)
+            done_jobs = [j for j in all_jobs if j.state == STATE_DONE]
+            # The rendered PowerQuery that actually ran (entity substituted) is stored
+            # on every job; carry it through so it lands in the results and workbook.
+            pq_used = all_jobs[0].pq if all_jobs else q.pq
             slice_results = []
             for j in done_jobs:
                 if j.result_path and Path(j.result_path).is_file():
@@ -361,13 +365,13 @@ class InvestigationEngine:
             out_json = results_dir / f"{_safe(q.id)}.json"
             out_json.write_text(json.dumps({
                 "query_id": q.id, "title": q.title, "merge_kind": q.merge.kind,
+                "pq": pq_used,
                 "columns": merged["columns"], "values": merged["values"],
                 "warnings": warns,
             }, indent=2))
             _write_csv(results_dir / f"{_safe(q.id)}.csv", merged)
-            all_jobs = ledger.jobs_for_query(run_id, q.id)
             manifest_queries.append({
-                "query_id": q.id, "title": q.title,
+                "query_id": q.id, "title": q.title, "pq": pq_used,
                 "slices_total": len(all_jobs),
                 "slices_done": len(done_jobs),
                 "slices_failed": sum(1 for j in all_jobs if j.state == STATE_FAILED),
