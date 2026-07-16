@@ -16,3 +16,6 @@ investigations/
 
 .DS_Store
 .pytest_cache/
+
+# Scratch screenshots dropped into the app dir; canonical docs images live in docs/images/
+app/images/

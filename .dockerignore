@@ -13,3 +13,5 @@ investigations/
 credentials.json
 config.json
 .DS_Store
+docs/
+app/images/

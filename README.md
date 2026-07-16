@@ -89,6 +89,10 @@ confirm the engine accepts it (catching syntax errors) before you run a 90-day i
 
 ## Using the UI
 
+The [step-by-step user guide](docs/user-guide.md) walks through the whole flow with screenshots:
+connect, choose and validate a catalog, configure and start the run, watch the live activity log, and
+read the verification panel and downloads. In short:
+
 1. **Connect.** Console URL and one or more service-user tokens (one per line to round-robin). Tokens
    stay in the server process; the browser never receives them. Every field has a `?` with guidance.
 2. **Catalog.** Pick one, or Edit / New / Import / Export it, and Validate vs SDL.
