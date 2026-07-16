@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S1 SOC Investigation</title>
+<style>
+  :root{
+    --bg:#0d0b14; --panel:#161320; --panel2:#1e1a2b; --line:#2c2740;
+    --text:#e8e6f0; --muted:#9a93b3; --accent:#8b5cf6; --accent2:#a855f7;
+    --ok:#34d399; --warn:#fbbf24; --bad:#f87171; --info:#60a5fa;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:14px 22px;
+    background:linear-gradient(90deg,#1a1030,#0d0b14);border-bottom:1px solid var(--line)}
+  header .logo{width:26px;height:26px;border-radius:6px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    box-shadow:0 0 16px rgba(139,92,246,.5)}
+  header h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .tag{font-size:11px;color:var(--muted);border:1px solid var(--line);
+    padding:2px 8px;border-radius:20px}
+  header .conn{margin-left:auto;font-size:12px;color:var(--muted)}
+  header .dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+    background:var(--bad);margin-right:6px;vertical-align:middle}
+  header .dot.on{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .wrap{display:grid;grid-template-columns:400px 1fr;gap:18px;padding:18px 22px;
+    max-width:1400px;margin:0 auto}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:16px 16px 18px;margin-bottom:16px}
+  .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.8px;
+    color:var(--muted);margin:0 0 12px}
+  label{display:block;font-size:12px;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea{width:100%;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;padding:9px 10px;font-size:13px;
+    font-family:inherit}
+  input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+  textarea{resize:vertical;min-height:58px;font-family:ui-monospace,Menlo,monospace}
+  .row{display:flex;gap:10px}.row>*{flex:1}
+  .chk{display:flex;align-items:center;gap:8px;margin-top:12px}
+  .chk input{width:auto}
+  .chk label{margin:0}
+  button{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;
+    border:none;border-radius:8px;padding:11px 14px;font-size:13px;font-weight:600;
+    cursor:pointer;width:100%;margin-top:14px}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line)}
+  .hint{font-size:11px;color:var(--muted);margin-top:6px}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;
+    font-weight:700;letter-spacing:.4px}
+  .badge.ok{background:rgba(52,211,153,.15);color:var(--ok);border:1px solid rgba(52,211,153,.4)}
+  .badge.bad{background:rgba(248,113,113,.15);color:var(--bad);border:1px solid rgba(248,113,113,.4)}
+  .badge.run{background:rgba(96,165,250,.15);color:var(--info);border:1px solid rgba(96,165,250,.4)}
+  .badge.warn{background:rgba(251,191,36,.15);color:var(--warn);border:1px solid rgba(251,191,36,.4)}
+  #log{background:#0a0812;border:1px solid var(--line);border-radius:8px;
+    height:340px;overflow:auto;padding:10px 12px;font:12px/1.55 ui-monospace,Menlo,monospace}
+  .le{white-space:pre-wrap;word-break:break-word;padding:1px 0}
+  .le .t{color:var(--muted)}
+  .le.ok .m{color:var(--ok)} .le.fail .m{color:var(--bad)} .le.perm .m{color:var(--bad)}
+  .le.warn .m{color:var(--warn)} .le.info .m{color:var(--info)}
+  table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
+  th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  .pill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:12px}
+  .pill.pass{background:rgba(52,211,153,.15);color:var(--ok)}
+  .pill.failed{background:rgba(248,113,113,.15);color:var(--bad)}
+  .pill.incomplete{background:rgba(251,191,36,.15);color:var(--warn)}
+  .stat{display:inline-block;margin-right:16px;font-size:12px;color:var(--muted)}
+  .stat b{color:var(--text);font-variant-numeric:tabular-nums}
+  .muted{color:var(--muted)}
+  .kv{font-size:12px;color:var(--muted);margin:2px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <h1>SentinelOne SOC Investigation</h1>
+  <span class="tag">execution engine</span>
+  <span class="conn"><span id="cdot" class="dot"></span><span id="cstat">not connected</span></span>
+</header>
+
+<div class="wrap">
+  <div>
+    <!-- Connect -->
+    <div class="card">
+      <h2>Connect</h2>
+      <label>Console URL</label>
+      <input id="console" placeholder="https://your-tenant.sentinelone.net">
+      <label>Service-user tokens (one per line, or comma-separated)</label>
+      <textarea id="tokens" placeholder="JWT for service user 1&#10;JWT for service user 2 (round-robin)"></textarea>
+      <div class="hint">Tokens stay in the server process, never sent back to the browser.</div>
+      <div class="row">
+        <div><label>Per-token rate (rps)</label><input id="rps" value="2.5"></div>
+        <div><label>Account IDs (optional)</label><input id="accts" placeholder="comma-separated"></div>
+      </div>
+      <button id="btnConnect">Connect</button>
+    </div>
+
+    <!-- Run -->
+    <div class="card">
+      <h2>Run investigation</h2>
+      <div class="row">
+        <div><label>Case ID</label><input id="case" placeholder="CASE-1234"></div>
+        <div><label>Entity</label><input id="entity" placeholder="user@corp.com"></div>
+      </div>
+      <label>Query catalog</label>
+      <select id="catalog"></select>
+      <div class="row">
+        <div><label>Lookback (days)</label><input id="lookback" type="number" value="90"></div>
+        <div><label>Slice size (days)</label><input id="sliceDays" type="number" value="1"></div>
+      </div>
+      <label>Output folder</label>
+      <input id="outputDir" placeholder="(default output base)">
+      <div class="hint" id="outHint"></div>
+      <div class="row">
+        <div><label>Worker pool</label><input id="pool" type="number" placeholder="tokens x 3"></div>
+        <div><label>Max attempts</label><input id="maxAttempts" type="number" value="4"></div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Priority</label>
+          <select id="priority"><option>LOW</option><option>HIGH</option></select>
+        </div>
+        <div class="chk" style="align-items:flex-end;padding-bottom:8px">
+          <input id="subdivide" type="checkbox" checked><label>Adaptive sub-slice</label>
+        </div>
+      </div>
+      <div class="chk"><input id="mock" type="checkbox"><label>Dry run (offline mock backend, no tenant)</label></div>
+      <button id="btnRun">Start investigation</button>
+    </div>
+  </div>
+
+  <div>
+    <!-- Verification -->
+    <div class="card">
+      <h2>Verification</h2>
+      <div id="verdict"><span class="muted">Run an investigation to see per-query verification.</span></div>
+      <div id="stats" style="margin-top:10px"></div>
+      <div id="vtable"></div>
+    </div>
+
+    <!-- Activity -->
+    <div class="card">
+      <h2>Activity log <span id="runlabel" class="muted"></span></h2>
+      <div id="log"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+function hdrs(){const h={"Content-Type":"application/json"}; if(TOKEN)h["X-Auth-Token"]=TOKEN; return h;}
+async function apiGet(path){const r=await fetch(path,{headers:hdrs()}); return r.json();}
+async function apiPost(path,body){const r=await fetch(path,{method:"POST",headers:hdrs(),body:JSON.stringify(body||{})}); return r.json();}
+const $=id=>document.getElementById(id);
+
+let CATALOGS=[];
+
+async function loadConfig(){
+  const c=await apiGet("/api/config");
+  $("outHint").textContent="Default base: "+c.output_base;
+  CATALOGS=c.catalogs||[];
+  const sel=$("catalog"); sel.innerHTML="";
+  CATALOGS.forEach(cat=>{
+    const o=document.createElement("option");
+    o.value=cat.path;
+    o.textContent=cat.error? (cat.name+" (parse error)") : `${cat.name}  (${cat.queries} queries)`;
+    sel.appendChild(o);
+  });
+  setConn(c.creds_ok, c.console_url, c.num_tokens);
+  if(c.console_url && !$("console").value) $("console").value=c.console_url;
+}
+function setConn(ok,url,n){
+  $("cdot").className="dot"+(ok?" on":"");
+  $("cstat").textContent= ok ? `connected · ${n} token${n==1?"":"s"}` : "not connected";
+}
+
+$("btnConnect").onclick=async()=>{
+  const body={console_url:$("console").value.trim(),tokens:$("tokens").value.trim(),
+    rps:parseFloat($("rps").value)||2.5,account_ids:$("accts").value.trim()};
+  const r=await apiPost("/api/connect",body);
+  setConn(r.creds_ok,r.console_url,r.num_tokens);
+  $("tokens").value=""; // never keep tokens in the DOM
+};
+
+let POLL=null, LASTSEQ=0, CURRENT=null;
+
+$("btnRun").onclick=async()=>{
+  const body={
+    case:$("case").value.trim()||"case", entity:$("entity").value.trim(),
+    catalog:$("catalog").value, lookback:parseInt($("lookback").value)||90,
+    sliceDays:parseInt($("sliceDays").value)||1, outputDir:$("outputDir").value.trim(),
+    pool:parseInt($("pool").value)||null, maxAttempts:parseInt($("maxAttempts").value)||4,
+    subdivide:$("subdivide").checked, priority:$("priority").value,
+    mock:$("mock").checked, mockThrottle:0
+  };
+  if(!body.entity){alert("Entity is required");return;}
+  const r=await apiPost("/api/run",body);
+  if(r.error){alert(r.error);return;}
+  CURRENT=r.run_id; LASTSEQ=0;
+  $("log").innerHTML=""; $("vtable").innerHTML=""; $("stats").innerHTML="";
+  $("runlabel").textContent="· "+r.run_id;
+  $("verdict").innerHTML='<span class="badge run">RUNNING</span> <span class="muted">'+r.run_dir+'</span>';
+  $("btnRun").disabled=true;
+  if(POLL)clearInterval(POLL);
+  POLL=setInterval(poll,1000); poll();
+};
+
+function addLine(ev){
+  const box=$("log");
+  const cls={slice_done:"ok",slice_failed:"fail",permanent:"perm",subdivided:"warn",
+    verification:"info",resume:"info",planned:"info",finalized:"info",error:"fail"}[ev.event]||"";
+  const t=new Date((ev.ts||0)*1000).toLocaleTimeString();
+  let msg=fmt(ev);
+  const div=document.createElement("div");
+  div.className="le "+cls;
+  div.innerHTML=`<span class="t">${t}</span> <span class="m">${msg}</span>`;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+}
+function fmt(e){
+  switch(e.event){
+    case"planned":return `planned ${e.jobs} jobs (${e.queries} queries × ${e.slices} slices)`;
+    case"resume":return `resume: reset ${e.reset_in_flight} stale in-flight → pending`;
+    case"slice_done":return `OK  ${e.query} [${e.slice}] rows=${e.rows} match=${e.match_count} ${e.elapsed_s}s ${e.client} gov=${e.gov_limit}`;
+    case"slice_failed":return `FAIL ${e.query} [${e.slice}] ${e.error||""}`;
+    case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
+    case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
+    case"finalized":return `finalized (complete=${e.complete})`;
+    case"verification":return `verification: ${e.passed?"PASS":"ATTENTION"} ${e.passed_queries}/${e.total_queries} queries`;
+    case"error":return `ERROR ${e.error||""}`;
+    default:return JSON.stringify(e);
+  }
+}
+
+async function poll(){
+  if(!CURRENT)return;
+  const a=await apiGet(`/api/activity?runId=${encodeURIComponent(CURRENT)}&since=${LASTSEQ}`);
+  (a.events||[]).forEach(ev=>{LASTSEQ=Math.max(LASTSEQ,ev.seq);addLine(ev);});
+  if(a.status && a.status!=="running"){
+    clearInterval(POLL);POLL=null;$("btnRun").disabled=false;
+    const s=await apiGet(`/api/status?runId=${encodeURIComponent(CURRENT)}`);
+    renderVerification(s);
+  }
+}
+
+function renderVerification(s){
+  if(s.status==="error"){
+    $("verdict").innerHTML='<span class="badge bad">ERROR</span> <span class="muted">'+(s.error||"")+'</span>';
+    return;
+  }
+  const v=s.verification;
+  if(!v){$("verdict").innerHTML='<span class="badge warn">'+s.status.toUpperCase()+'</span>';return;}
+  const badge = v.passed?'<span class="badge ok">PASS — all queries completed</span>'
+                        :'<span class="badge bad">ATTENTION — incomplete</span>';
+  $("verdict").innerHTML=badge+` <span class="muted">${v.passed_queries}/${v.total_queries} queries passed</span>`;
+  const st=s.stats||{};
+  $("stats").innerHTML=Object.entries({done:st.done,failed:st.failed,permanent:st.permanent,
+    retries:st.retries,throttles:st.throttles,subdivided:st.subdivided})
+    .filter(([k,v])=>v!==undefined).map(([k,v])=>`<span class="stat">${k} <b>${v}</b></span>`).join("");
+  let html='<table><thead><tr><th>Query</th><th>Status</th><th class="n">Done</th>'+
+    '<th class="n">Fail</th><th class="n">Perm</th><th class="n">Pend</th><th class="n">Rows</th></tr></thead><tbody>';
+  v.queries.forEach(q=>{
+    html+=`<tr><td>${q.query_id}<div class="kv">${q.title||""}</div></td>`+
+      `<td><span class="pill ${q.status}">${q.status}</span></td>`+
+      `<td class="n">${q.done}</td><td class="n">${q.failed}</td><td class="n">${q.permanent}</td>`+
+      `<td class="n">${q.pending+q.in_flight}</td><td class="n">${q.result_rows}</td></tr>`;
+    if(q.warnings&&q.warnings.length)
+      html+=`<tr><td colspan="7" class="kv">⚠ ${q.warnings.join("; ")}</td></tr>`;
+  });
+  html+='</tbody></table>';
+  html+=`<div class="kv" style="margin-top:8px">Results, ledger, activity log and manifest written to: ${s.run_dir}</div>`;
+  $("vtable").innerHTML=html;
+}
+
+loadConfig();
+</script>
+</body>
+</html>

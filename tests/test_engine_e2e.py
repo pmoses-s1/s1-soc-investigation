@@ -1,0 +1,118 @@
+"""End-to-end engine tests against the in-memory FakeTransport (no network)."""
+
+from s1engine.activity import ActivityLog
+from s1engine.catalog import Catalog, MergeSpec, Query
+from s1engine.config import load_config
+from s1engine.engine import InvestigationEngine, RunParams
+from s1engine.ledger import Ledger, STATE_PERMANENT
+from s1engine.testing import FakeTransport
+from s1engine.verify import verify_run
+
+
+AGG_MERGE = MergeSpec(kind="aggregate", key_cols=["event_day"], sum_cols=["hits"],
+                      min_cols=["first_seen"], max_cols=["last_seen"])
+
+
+def _catalog(extra=None):
+    queries = [
+        Query(id="auth", title="Auth", pq="dataSource.name='X' {{entity}} | group hits=count() by event_day", merge=AGG_MERGE),
+        Query(id="files", title="Files", pq="dataSource.name='Y' {{entity}} | columns a,b | limit 10", merge=MergeSpec(kind="rows")),
+    ]
+    if extra:
+        queries.extend(extra)
+    return Catalog(name="test", queries=queries)
+
+
+def _config(**over):
+    return load_config(require_credentials=False, console_url="https://mock",
+                       tokens=["t1", "t2"], poll_interval_s=0.01,
+                       query_timeout_s=5.0, **over)
+
+
+def _engine(tmp_path, transport, activity=None, pool_size=4):
+    return InvestigationEngine(_config(), output_root=tmp_path, transport=transport,
+                               pool_size=pool_size, activity=activity)
+
+
+def test_full_run_passes_and_logs_activity(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    act = ActivityLog(tmp_path / "activity.jsonl")
+    eng = _engine(tmp_path, FakeTransport(), activity=act)
+    params = RunParams(case_id="C", entity="alice", lookback_days=2, slice_days=1)
+    run_id = "run-1"
+    eng.plan(run_id, _catalog(), params, led)
+    eng.run(run_id, led, params)
+    man = eng.finalize(run_id, led, _catalog(), params)
+    v = verify_run(led, run_id, _catalog())
+    assert v.passed
+    assert v.passed_queries == v.total_queries == 2
+    # activity was persisted
+    assert (tmp_path / "activity.jsonl").read_text().strip()
+    assert ActivityLog.read_file(tmp_path / "activity.jsonl")
+    # aggregate query merged per-day; rows query concatenated across slices
+    assert man["complete"]
+    led.close()
+    act.close()
+
+
+def test_throttles_are_absorbed(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    eng = _engine(tmp_path, FakeTransport(throttle_first_n=4))
+    params = RunParams(case_id="C", entity="bob", lookback_days=2, slice_days=1)
+    eng.plan("run-t", _catalog(), params, led)
+    result = eng.run("run-t", led, params)
+    eng.finalize("run-t", led, _catalog(), params)
+    v = verify_run(led, "run-t", _catalog())
+    assert v.passed
+    assert result["stats"]["throttles"] >= 1
+    led.close()
+
+
+def test_query_syntax_error_is_permanent(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    broken = Query(id="broken", title="Broken",
+                   pq="dataSource.name='Z' BROKEN {{entity}} | limit 1",
+                   merge=MergeSpec(kind="rows"))
+    cat = _catalog(extra=[broken])
+    eng = _engine(tmp_path, FakeTransport(fail_query_substr={"BROKEN": "syntax"}))
+    params = RunParams(case_id="C", entity="carol", lookback_days=1, slice_days=1)
+    eng.plan("run-p", cat, params, led)
+    eng.run("run-p", led, params)
+    eng.finalize("run-p", led, cat, params)
+    v = verify_run(led, "run-p", cat)
+    assert not v.passed
+    # the two good queries still pass; only the broken one fails
+    by_id = {q.query_id: q for q in v.queries}
+    assert by_id["auth"].status == "pass"
+    assert by_id["broken"].status == "failed"
+    perm = led.jobs_for_query("run-p", "broken", state=STATE_PERMANENT)
+    assert len(perm) >= 1
+    led.close()
+
+
+def test_resume_retries_failed_slices_on_second_run(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    flaky = Query(id="flaky", title="Flaky",
+                  pq="dataSource.name='W' FLAKY {{entity}} | limit 1",
+                  merge=MergeSpec(kind="rows"))
+    cat = _catalog(extra=[flaky])
+    run_id = "run-r"
+    params = RunParams(case_id="C", entity="dan", lookback_days=1, slice_days=1,
+                       max_attempts=1, subdivide_on_timeout=False)
+
+    # Run 1: the flaky query's slices fail (server errors), so the run is incomplete.
+    eng1 = _engine(tmp_path, FakeTransport(fail_query_substr={"FLAKY": "server"}))
+    eng1.plan(run_id, cat, params, led)
+    eng1.run(run_id, led, params)
+    v1 = verify_run(led, run_id, cat)
+    assert not v1.passed
+
+    # Run 2: same ledger + run id, a healthy backend. Only the failed slices re-run;
+    # the already-done slices are skipped (resume + cache behaviour).
+    eng2 = _engine(tmp_path, FakeTransport())
+    eng2.plan(run_id, cat, params, led)     # idempotent: does not reset done work
+    eng2.run(run_id, led, params)
+    eng2.finalize(run_id, led, cat, params)
+    v2 = verify_run(led, run_id, cat)
+    assert v2.passed
+    led.close()

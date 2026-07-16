@@ -1,0 +1,21 @@
+# Local, loopback-only deployment. Reachable only from this machine.
+#   docker compose up --build      then open http://localhost:8901
+#
+# To expose on a network, set S1IE_BIND_ALL=1 and a strong S1IE_AUTH_TOKEN in .env,
+# change the port mapping to "8901:8801", and open http://<host>:8901/?token=<secret>.
+services:
+  s1-soc-investigation:
+    build: .
+    image: s1-soc-investigation:latest
+    container_name: s1-soc-investigation
+    ports:
+      # host loopback only -> container. Change to "8901:8801" only when exposing with a token.
+      - "127.0.0.1:8901:8801"
+    env_file:
+      - .env
+    volumes:
+      # Map your host output folder to the container's /data (S1IE_OUTPUT_DIR).
+      # Everything the engine writes (ledger, activity log, slice cache, results,
+      # manifest) lands here and persists on your machine.
+      - ./investigations:/data
+    restart: unless-stopped

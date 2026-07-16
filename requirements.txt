@@ -1,0 +1,5 @@
+# Runtime deps. The engine core (slicing, ledger, merge, rate limiter) uses only
+# the standard library; requests is needed for live runs and pyyaml for YAML
+# catalogs. Offline --mock runs and the test suite need neither.
+requests>=2.31
+PyYAML>=6.0

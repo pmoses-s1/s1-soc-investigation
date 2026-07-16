@@ -1,0 +1,102 @@
+name: insider_threat_v1
+
+# Example investigation catalog. Replace the pq bodies with your real standard
+# query set. Each query is run per time-slice; the `merge` block tells the engine
+# how to reassemble the sliced results into one table.
+#
+# Templating: {{entity}} is substituted with the --entity value at run time.
+# Any other {{var}} must be supplied with --var name=value.
+#
+# merge.kind:
+#   aggregate -> group/count style. Give key_cols + sum/min/max/distinct_cols.
+#   rows      -> LOG / row-level. Slices are unioned with column alignment.
+#
+# distinct_cols use estimate_distinct, which is NOT additive across slices, so
+# the engine flags the merged value as an approximate upper bound.
+
+queries:
+  - id: auth_by_day
+    title: "Authentication events per day (4624/4625)"
+    pq: >
+      dataSource.name='Windows Event Logs'
+      winEventLog.description contains:anycase("{{entity}}")
+      winEventLog.id in (4624,4625)
+      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
+      | sort event_day
+    merge:
+      kind: aggregate
+      key_cols: [event_day]
+      sum_cols: [hits]
+      min_cols: [first_seen]
+      max_cols: [last_seen]
+
+  - id: failed_logons_by_host
+    title: "Failed logons (4625) by host"
+    pq: >
+      dataSource.name='Windows Event Logs'
+      winEventLog.id=4625
+      winEventLog.description contains:anycase("{{entity}}")
+      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
+      | sort -hits
+    merge:
+      kind: aggregate
+      key_cols: [event_day]
+      sum_cols: [hits]
+      min_cols: [first_seen]
+      max_cols: [last_seen]
+
+  - id: dns_unique_domains
+    title: "Distinct external domains queried per day (approx)"
+    pq: >
+      dataSource.category='network'
+      src.user.name contains:anycase("{{entity}}")
+      event.dns.request=*
+      | group hits=count(), uniq_domains=estimate_distinct(event.dns.request), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
+      | sort event_day
+    merge:
+      kind: aggregate
+      key_cols: [event_day]
+      sum_cols: [hits]
+      min_cols: [first_seen]
+      max_cols: [last_seen]
+      distinct_cols: [uniq_domains]
+
+  - id: outbound_bytes_by_day
+    title: "Outbound byte volume per day"
+    pq: >
+      dataSource.category='network'
+      src.user.name contains:anycase("{{entity}}")
+      direction='out'
+      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
+      | sort event_day
+    merge:
+      kind: aggregate
+      key_cols: [event_day]
+      sum_cols: [hits]
+      min_cols: [first_seen]
+      max_cols: [last_seen]
+
+  - id: usb_file_writes
+    title: "Removable-media file writes (row detail)"
+    pq: >
+      dataSource.name='SentinelOne' dataSource.category='security'
+      event.type='File Creation'
+      tgt.file.location contains:anycase("Removable")
+      src.process.user contains:anycase("{{entity}}")
+      | columns event.time, endpoint.name, src.process.user, tgt.file.path, src.process.name
+      | sort -event.time
+      | limit 1000
+    merge:
+      kind: rows
+
+  - id: mail_forwarding_rules
+    title: "New mailbox forwarding rules (row detail)"
+    pq: >
+      dataSource.category='email'
+      actor.user.email_addr contains:anycase("{{entity}}")
+      activity_name contains:anycase("forward")
+      | columns event.time, actor.user.email_addr, activity_name, unmapped.forwardTo
+      | sort -event.time
+      | limit 1000
+    merge:
+      kind: rows

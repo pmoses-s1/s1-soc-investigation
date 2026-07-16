@@ -1,0 +1,15 @@
+.env
+*.env
+.git
+.github
+__pycache__/
+*.pyc
+investigations/
+*.db
+*.db-wal
+*.db-shm
+*.log
+.pytest_cache/
+credentials.json
+config.json
+.DS_Store
