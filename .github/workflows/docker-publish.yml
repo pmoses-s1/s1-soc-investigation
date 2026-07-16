@@ -44,5 +44,7 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           provenance: false
+          build-args: |
+            S1IE_VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('0.3.0+{0}', github.sha) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

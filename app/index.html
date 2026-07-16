@@ -105,7 +105,7 @@
   <div class="logo">S1</div>
   <div>
     <h1>SentinelOne SOC Investigation</h1>
-    <div class="sub">Long-lookback query execution engine for Singularity Data Lake</div>
+    <div class="sub">Long-lookback query execution engine for Singularity Data Lake · <span id="ver" title="active build">v-</span></div>
   </div>
   <span class="conn"><span id="cdot" class="dot"></span><span id="cstat">not connected</span></span>
 </header>
@@ -218,6 +218,7 @@ let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
 
 async function loadConfig(){
   const c=await apiGet("/api/config");
+  if(c.version) $("ver").textContent="v"+c.version;
   $("outHint").textContent="Default base: "+c.output_base;
   CATALOGS=c.catalogs||[];
   const sel=$("catalog"); const prev=sel.value; sel.innerHTML="";

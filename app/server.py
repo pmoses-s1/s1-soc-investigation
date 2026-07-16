@@ -32,6 +32,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 sys.path.insert(0, str(REPO))
 
+from s1engine import __version__ as ENGINE_VERSION           # noqa: E402
 from s1engine.activity import ActivityLog                     # noqa: E402
 from s1engine.catalog import load_catalog                     # noqa: E402
 from s1engine.config import EngineConfig, load_config         # noqa: E402
@@ -298,7 +299,8 @@ class H(BaseHTTPRequestHandler):
         qs = parse_qs(urlparse(self.path).query)
         if p == "/api/config":
             return self._send(200, {**creds_status(), "catalogs": list_catalogs(),
-                                    "output_base": str(OUTPUT_BASE), "exposed": EXPOSED})
+                                    "output_base": str(OUTPUT_BASE), "exposed": EXPOSED,
+                                    "version": os.environ.get("S1IE_VERSION") or ENGINE_VERSION})
         if p == "/api/runs":
             with _RUNS_LOCK:
                 runs = [{"run_id": r["run_id"], "case": r["case"], "entity": r["entity"],
