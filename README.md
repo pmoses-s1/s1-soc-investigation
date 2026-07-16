@@ -87,6 +87,25 @@ PowerQuery that produced it at the top. The CSV/JSON results and `manifest.json`
 persist in the output volume. **Validate against SDL** launches each query over a short window to
 confirm the engine accepts it (catching syntax errors) before you run a 90-day investigation.
 
+## DFIR catalogs and variables
+
+The bundled `catalogs/` include a DFIR insider-threat set converted from a real investigation
+workbook: eight domain catalogs (`dfir_identity_access`, `dfir_endpoint`, `dfir_collab_storage`,
+`dfir_web_network`, `dfir_cloud`, `dfir_saas_apps`, `dfir_exfil_dlp`, `dfir_correlation`) plus a
+master `dfir_insider_threat_full` for a one-click full sweep. Pick a domain catalog per phase, or the
+master to run everything the provided variables allow.
+
+Queries use template variables. `{{entity}}` (the subject) is set on the run form; the rest are set in
+the **Variables** popup: `{{hostname}}`, `{{agent_uuid}}`, `{{ip}}`, `{{username}}`, `{{sf_user_id}}`,
+`{{session}}`, plus optional config datatable names (`dt_*`) for the identity-mapping queries. A query
+whose variables are not all set is **skipped, not failed**, so you run the identity phase first, fill
+in the host/agent you discover, and re-run to light up the endpoint and network queries. The catalog
+dropdown shows which variables each catalog needs and which are still unset.
+
+**Refresh catalogs from the repo.** The **Refresh from repo** button pulls the latest `catalogs/`
+from GitHub into the persisted catalogs folder at runtime, so query updates do not require rebuilding
+the image. Point it at a different repo/branch with `S1IE_CATALOG_REPO` / `S1IE_CATALOG_REPO_REF`.
+
 ## Using the UI
 
 The [step-by-step user guide](docs/user-guide.md) walks through the whole flow with screenshots:

@@ -47,6 +47,11 @@ HOST = os.environ.get("S1IE_HOST", "127.0.0.1")
 OUTPUT_BASE = Path(os.environ.get("S1IE_OUTPUT_DIR", str(REPO / "investigations")))
 BUNDLED_CATALOGS = Path(os.environ.get("S1IE_CATALOG_DIR", str(REPO / "catalogs")))
 USER_CATALOGS = OUTPUT_BASE / "catalogs"   # writable, persists on the output volume
+# Catalogs can be refreshed from the repo at runtime, so updating queries does not
+# require rebuilding the image. Pulled files land in the persisted user catalogs dir.
+CATALOG_REPO = os.environ.get("S1IE_CATALOG_REPO", "pmoses-s1/s1-soc-investigation")
+CATALOG_REPO_PATH = os.environ.get("S1IE_CATALOG_REPO_PATH", "catalogs")
+CATALOG_REPO_REF = os.environ.get("S1IE_CATALOG_REPO_REF", "main")
 AUTH_TOKEN = os.environ.get("S1IE_AUTH_TOKEN", "").strip()
 EXPOSED = os.environ.get("S1IE_BIND_ALL", "").strip().lower() in ("1", "true", "yes", "on")
 _EXTRA_ORIGINS = {o.strip() for o in os.environ.get("S1IE_ALLOWED_ORIGINS", "").split(",") if o.strip()}
@@ -253,6 +258,40 @@ def start_run(d: dict) -> dict:
     return {"run_id": run_id, "run_dir": str(run_dir)}
 
 
+def refresh_catalogs_from_repo() -> dict:
+    """Pull the catalogs/ folder from the GitHub repo into the persisted user
+    catalogs dir. Lets query updates land without rebuilding the image."""
+    import urllib.request
+    api = f"https://api.github.com/repos/{CATALOG_REPO}/contents/{CATALOG_REPO_PATH}?ref={CATALOG_REPO_REF}"
+    hdrs = {"Accept": "application/vnd.github+json", "User-Agent": "s1-soc-investigation"}
+    with urllib.request.urlopen(urllib.request.Request(api, headers=hdrs), timeout=30) as r:
+        items = json.load(r)
+    USER_CATALOGS.mkdir(parents=True, exist_ok=True)
+    saved, errors = [], []
+    for it in items:
+        name = it.get("name", "")
+        if it.get("type") != "file" or not name.lower().endswith((".yaml", ".yml", ".json")):
+            continue
+        url = it.get("download_url")
+        if not url:
+            continue
+        try:
+            with urllib.request.urlopen(
+                    urllib.request.Request(url, headers={"User-Agent": "s1-soc-investigation"}),
+                    timeout=30) as rr:
+                content = rr.read().decode()
+            dest = USER_CATALOGS / name
+            tmp = USER_CATALOGS / (Path(name).stem + ".__tmp__" + Path(name).suffix)
+            tmp.write_text(content)
+            load_catalog(tmp)  # validate before publishing
+            tmp.replace(dest)
+            saved.append(name)
+        except Exception as e:  # noqa: BLE001
+            errors.append({"file": name, "error": str(e)})
+    return {"refreshed": len(saved), "files": saved, "errors": errors,
+            "repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}"}
+
+
 def save_catalog(d: dict) -> dict:
     filename = _safe(d.get("filename") or "").strip()
     content = d.get("content") or ""
@@ -303,7 +342,8 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/config":
             return self._send(200, {**creds_status(), "catalogs": list_catalogs(),
                                     "output_base": str(OUTPUT_BASE), "exposed": EXPOSED,
-                                    "version": os.environ.get("S1IE_VERSION") or ENGINE_VERSION})
+                                    "version": os.environ.get("S1IE_VERSION") or ENGINE_VERSION,
+                                    "catalog_repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}"})
         if p == "/api/runs":
             with _RUNS_LOCK:
                 runs = [{"run_id": r["run_id"], "case": r["case"], "entity": r["entity"],
@@ -402,6 +442,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"status": "cancelling"})
             if p == "/api/catalog_save":
                 return self._send(200, save_catalog(d))
+            if p == "/api/refresh_catalogs":
+                return self._send(200, refresh_catalogs_from_repo())
             if p == "/api/validate":
                 mock = bool(d.get("mock"))
                 if d.get("content"):

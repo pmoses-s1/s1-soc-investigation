@@ -1,0 +1,30 @@
+name: 'DFIR: Cloud'
+queries:
+- id: aws-01
+  title: AWS CloudTrail Identity Coverage
+  notes: 'Does this email/username appear in CloudTrail sources? | Source: all *-cloudtrail | Pivot if positive: AWS-02 high-risk API calls, GuardDuty/SecurityHub'
+  pq: |-
+    serverHost in ('DataSet-CloudTrail','OW-CloudTrail','nglz-cloudtrail','observo-cloudtrail','infosec-sandbox-org-cloudtrail','infosec-attivo-cloudtrail','pingsafe-cloudtrail','promptsecurity-cloudtrail')
+    | filter userIdentity.arn contains:anycase('{{username}}') OR userIdentity.sessionContext.sessionIssuer contains:anycase('{{username}}') OR userIdentity.userName contains:anycase('{{username}}')
+    | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp), Accounts=array_agg_distinct(recipientAccountId, 20), EventNames=array_agg_distinct(eventName, 20), IPs=array_agg_distinct(sourceIPAddress, 20) by Source=serverHost
+    | sort -EventCount
+    | limit 100
+- id: aws-02
+  title: AWS High-Risk API Calls
+  notes: 'Any privilege escalation, access key, S3, or anti-forensics activity? | Source: all *-cloudtrail | Pivot if positive: GuardDuty, VPC Flow, DNS, S3 access logs'
+  pq: |-
+    serverHost contains:anycase("cloudtrail")
+    | filter userIdentity.arn contains:anycase('{{username}}') OR userIdentity.sessionContext.sessionIssuer contains:anycase('{{username}}')
+    | filter eventName in ('CreateAccessKey','AttachUserPolicy','PutUserPolicy','CreatePolicyVersion','AddUserToGroup','AssumeRole','PassRole','StopLogging','DeleteTrail','PutEventSelectors','GetObject','ListBucket','PutBucketPolicy')
+    | sort -timestamp
+    | limit 2000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Account=recipientAccountId, Event=eventName, User=userIdentity.arn, Issuer=userIdentity.sessionContext.sessionIssuer.userName, IP=sourceIPAddress, UA=userAgent, Error=errorCode, Request=requestParameters
+- id: aws-03
+  title: GuardDuty / SecurityHub Findings by Identity/IP
+  notes: 'Any cloud findings tied to user identity or observed IP? | Source: GuardDuty/SecurityHub | Pivot if positive: CloudTrail by accessKeyId/principalId/IP'
+  pq: |-
+    serverHost in ('ow-guardduty','nglz-guardduty','scalyr-guardduty','attivo-guardduty','nglz-securityhub','scalyr-securityhub')
+    | filter record contains:anycase('{{username}}') OR Service.Action.RemoteIpDetails.ipAddressV4 == '{{ip}}' OR Resources contains:anycase('{{username}}')
+    | sort -timestamp
+    | limit 1000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Type=Type, Severity=Severity, Account=AccountId, Region=Region, Resource=Resource, RemoteIP=Service.Action.RemoteIpDetails.ipAddressV4

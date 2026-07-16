@@ -1,0 +1,182 @@
+name: 'DFIR: Collaboration & storage'
+queries:
+- id: gws-01
+  title: GWS All Drive Activity — Overview
+  notes: 'What Google Drive event types did this user generate? Baseline before drilling down. | Source: google_workspace | Pivot if positive: download, copy, print, trash spikes → drill into specific queries below'
+  pq: |-
+    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    | group Events=count() by EventName=event.name, Day.timestamp=timebucket(timestamp,'1d')
+    | sort -Day.timestamp
+    | transpose EventName on Day.timestamp
+- id: gws-02
+  title: GWS Downloads
+  notes: 'What files did the user explicitly download from Google Drive?
+
+
+    NOTE: event.originating_app_id != ''124622177520'' excludes automated Glean/SCIO indexing. This is required — without this exclusion, results include thousands of automated ''downloads'' that are not user actions. | Source: google_workspace | Pivot if positive: Sensitive files → GWS-05 for classification. Endpoint Downloads folder EDR-07 for same filenames'
+  pq: |-
+    serverHost='google_workspace' actor.email='{{entity}}' event.name='download' id.applicationName='drive'
+    | filter event.originating_app_id != '124622177520'
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 5000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, DocType=event.doc_type, Classification=classificationLabel, IP=ipAddress, App=event.app_name
+- id: gws-03
+  title: GWS External Sharing
+  notes: 'Were any files shared externally (public link, anyone with link, shared_externally)? | Source: google_workspace | Pivot if positive: Externally shared + Confidential/HC classification = escalate. Was file also downloaded?'
+  pq: |-
+    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    | filter event.visibility in:anycase ('public_on_the_web','people_with_link','shared_externally') OR event.old_visibility in:anycase ('public_on_the_web','people_with_link','shared_externally')
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, NewVisibility=event.visibility, OldVisibility=event.old_visibility, Classification=classificationLabel, Owner=event.owner, IP=ipAddress
+- id: gws-04
+  title: GWS Deleted / Trashed Files
+  notes: 'Did the user delete or trash files — especially after downloading them? Anti-forensics signal. | Source: google_workspace | Pivot if positive: Compare deletion timestamps to GWS-02 download timestamps for same doc IDs'
+  pq: |-
+    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    | filter event.name in:anycase ('trash','delete')
+    | filter !(event.deletion_reason == 'trash_auto_delete')
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Reason=event.deletion_reason, IP=ipAddress
+- id: gws-05
+  title: GWS Sensitive File Access — Confidential + HC
+  notes: 'Which Confidential or Highly Confidential files did this user access, sync, or download? | Source: google_workspace | Pivot if positive: Repeated sync of same HC doc → EDR temp file artifacts for confirmation'
+  pq: |-
+    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    | filter classificationLabel in:anycase ('Highly Confidential','Confidential')
+    | filter event.name in:anycase ('sync_item_content','download','access_item_content','view','copy','print')
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 5000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Event=event.name, DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Owner=event.owner, IP=ipAddress, App=event.app_name
+- id: gws-06
+  title: GWS Activity Daily Summary
+  notes: 'How many events and unique documents per day? Identify spike days for deeper review. | Source: monitor | Pivot if positive: Peak days → run GWS-02 and GWS-05 scoped to those dates'
+  pq: |-
+    serverHost='monitor' pqEvent='google_workspace_user_summary'
+    | filter actor.email == '{{entity}}'
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 1000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Email=actor.email, TotalDownloads, UniqueFileCount, GB
+- id: slk-01
+  title: Slack File Downloads — All Devices
+  notes: 'What files did the user download from Slack? Includes device type parsed from user agent.
+
+
+    NOTE: Glean/SCIO crawler is excluded — it would generate thousands of false file_downloaded events. Always include these exclusions. | Source: slack | Pivot if positive: iPhone/Android downloads → outside ZIA inspection. Filenames → correlate with GWS downloads'
+  pq: |-
+    serverHost='slack' actor.user.email='{{entity}}' action='file_downloaded'
+    | filter !(context.app.name contains:anycase 'Glean')
+    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
+    | filter !(context.ua contains:anycase 'Scio Search')
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | let DeviceType=context.ua contains:anycase 'iphone' ? 'iPhone (personal)' : context.ua contains:anycase 'android' ? 'Android (personal)' : context.ua contains:anycase 'AppleSilicon Sonic Slack' ? 'macOS Desktop App' : context.ua contains:anycase 'Sonic Slack' ? 'Windows Desktop App' : context.ua contains:anycase("Windows NT") ? 'Windows Browser' : context.ua contains:anycase("Macintosh") ? 'macOS Browser' : context.ua
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Device=DeviceType, IP=context.ip_address, Location=context.location.name, URL=details.url_private
+- id: slk-02
+  title: Slack Non-Corporate Device Downloads
+  notes: 'Files downloaded to personal devices only (excludes corporate Windows device). Replace Windows NT version with subject''s actual OS build if known. | Source: slack | Pivot if positive: iPhone downloads from off-network IP = highest priority for AXIOM. File IDs for forensic retrieval'
+  pq: |-
+    serverHost='slack' actor.user.email='{{entity}}' action in ('file_downloaded','file_shared','file_uploaded','file_deleted')
+    | filter !(context.ua contains:anycase 'Windows NT 10.0.26100')
+    | filter !(context.ua contains:anycase 'OKTA')
+    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
+    | filter !(context.ua contains:anycase 'Scio Search')
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Action=action, File=entity.file.name, FileID=entity.file.id, IP=context.ip_address, UA=context.ua, URL=details.url_private
+- id: slk-03
+  title: Slack File Uploads
+  notes: 'What files did the user upload to Slack? Uploading sensitive docs to Slack = potential staging for sharing. | Source: slack | Pivot if positive: Sensitive filename → channel ID → resolve channel name with Slack admin. Multiple uploads = 5+ = deliberate sharing'
+  pq: |-
+    serverHost='slack' actor.user.email='{{entity}}' action='file_uploaded'
+    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Channel=entity.channel.id, IP=context.ip_address, UA=context.ua
+- id: slk-04
+  title: Slack Channel Joins — Burst Pattern
+  notes: 'Did the user join many channels in a short period? Burst joins before departure = accessing file history. | Source: slack | Pivot if positive: Channel joined → file_downloaded from that channel in same day window?'
+  pq: |-
+    serverHost='slack' actor.user.email='{{entity}}' action='user_joined_channel'
+    | let ts=(timestamp || event.time || sca:ingestTime)
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Channel=entity.channel.name, ChannelID=entity.channel.id, IP=context.ip_address
+- id: slk-05
+  title: Slack Activity by Device Type
+  notes: 'What device types has the user accessed Slack from? Shows corporate vs personal device breakdown. | Source: slack | Pivot if positive: Mobile device present → SLK-02 for mobile-only downloads'
+  pq: |-
+    serverHost='slack' actor.user.email='{{entity}}'
+    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
+    | filter !(context.ua contains:anycase 'Scio Search')
+    | let DeviceType=context.ua contains:anycase 'iphone' ? 'iPhone' : context.ua contains:anycase 'android' ? 'Android' : context.ua contains:anycase 'AppleSilicon Sonic Slack' ? 'macOS Desktop App' : context.ua contains:anycase 'Sonic Slack' ? 'Windows Desktop App' : context.ua contains:anycase("Windows NT") ? 'Windows Browser' : context.ua contains:anycase("Macintosh") ? 'macOS Browser' : 'Other/API'
+    | group Events=count(), Actions=array_agg_distinct(action, 10) by DeviceType
+    | sort -Events
+- id: atl-01
+  title: Atlassian/Jira/Confluence Coverage
+  notes: 'What Atlassian/Jira/Confluence activity exists for this user? | Source: atlassian-cloud-enterprise/jira/confluence-cloud | Pivot if positive: ATL-02/ATL-03 and Okta app SSO'
+  pq: |-
+    serverHost in ('atlassian-cloud-enterprise','jira','confluence-cloud')
+    | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}') OR user contains:anycase('{{username}}')
+    | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp), Actions=array_agg_distinct(action, 20) by Source=serverHost
+    | sort -EventCount
+    | limit 100
+- id: atl-02
+  title: Confluence Space Exports / Jira Bulk
+  notes: 'Any export-like actions in Confluence/Jira? | Source: confluence-cloud/jira/atlassian-cloud-enterprise | Pivot if positive: Endpoint archive/staging, ZIA upload, Google Drive/Box follow-on'
+  pq: |-
+    serverHost in ('confluence-cloud','jira','atlassian-cloud-enterprise')
+    | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}')
+    | filter action contains:anycase('export') OR action contains:anycase('download') OR action contains:anycase('attachment') OR event.name contains:anycase('export')
+    | sort -timestamp
+    | limit 2000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, Action=action, Object=object, IP=location.ip, Method=method
+- id: atl-03
+  title: Atlassian API Token / Admin Changes
+  notes: 'Was access, token, or admin configuration changed? | Source: atlassian-cloud-enterprise | Pivot if positive: Okta admin events, PagerDuty/Snyk admin changes'
+  pq: |-
+    serverHost='atlassian-cloud-enterprise'
+    | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}')
+    | filter action contains:anycase('token') OR action contains:anycase('admin') OR action contains:anycase('group') OR action contains:anycase('permission')
+    | sort -timestamp
+    | limit 1000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Action=action, IP=location.ip, Token=actor.tokenLabel, Changes=changedValues, Context=context
+- id: sto-01
+  title: Google Drive Downloads / External Sharing
+  notes: 'Drive downloads, visibility changes, or external sharing by user. | Source: google_workspace/google_workspace_prompt_drive | Pivot if positive: ZIA upload/exfil, Endpoint file activity'
+  pq: |-
+    serverHost in ('google_workspace','google_workspace_prompt_drive')
+    | filter actor.email contains:anycase('{{entity}}')
+    | filter id.applicationName='drive' OR event.name contains:anycase('download') OR event.name contains:anycase('visibility') OR event.visibility contains:anycase('external')
+    | sort -timestamp
+    | limit 3000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, App=id.applicationName, Event=event.name, Title=event.doc_title, Owner=event.owner, Visibility=event.visibility, IP=ipAddress, Label=classificationLabel
+- id: sto-02
+  title: Box Downloads / Sharing
+  notes: 'Box downloads, shared links, collaboration invites. | Source: box | Pivot if positive: Exclude service_name=Box Drive/Sync then corroborate with endpoint/ZIA'
+  pq: |-
+    serverHost='box'
+    | filter created_by.login contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}')
+    | filter event_type contains:anycase('download') OR event_type contains:anycase('share') OR event_type contains:anycase('collaboration') OR event_type contains:anycase('link')
+    | sort -timestamp
+    | limit 3000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=created_by.login, Event=event_type, Item=source.name, Size=additional_details.size, IP=ip_address, Service=additional_details.service_name
+- id: sto-03
+  title: OneDrive / SharePoint Activity
+  notes: 'Any M365 storage activity for this user? | Source: onedrive | Pivot if positive: Storage and ZIA/Endpoint corroboration'
+  pq: |-
+    serverHost='onedrive'
+    | filter actor.email contains:anycase('{{entity}}') OR user contains:anycase('{{entity}}')
+    | filter event.name contains:anycase('download') OR event.name contains:anycase('share') OR event.name contains:anycase('sync') OR event.name contains:anycase('access')
+    | sort -timestamp
+    | limit 3000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Event=event.name, Object=event.doc_title, IP=ipAddress, Label=classificationLabel

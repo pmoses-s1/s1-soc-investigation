@@ -113,6 +113,14 @@
   <span class="conn"><span id="cdot" class="dot"></span><span id="cstat">not connected</span></span>
 </header>
 
+<div style="max-width:1480px;margin:0 auto;padding:18px 28px 0">
+  <div class="card" style="margin-bottom:0;padding:16px 20px">
+    <div style="font-size:13.5px;color:var(--hint);line-height:1.6">
+      Runs a standard SOC investigation query catalog across long (90+ day) lookbacks over the SentinelOne Singularity Data Lake, slice by slice. Reliable execution with automatic retries, rate control, and caching; a per-run verification report that proves nothing was skipped; and an exported workbook plus downloadable log evidence. No UI timeouts, no silently-dropped queries, no MCP. Pick a catalog, an entity, and a lookback, start it, and come back to reviewed findings.
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
   <div>
     <!-- Connect -->
@@ -149,6 +157,12 @@
         <button class="ghost sm" id="btnCatImport">Import</button>
         <button class="ghost sm" id="btnCatExport">Export</button>
         <button class="ghost sm" id="btnCatValidate">Validate vs SDL</button>
+        <button class="ghost sm" id="btnRefreshCatalogs">Refresh from repo</button>
+      </div>
+      <div class="hint" id="catVars"></div>
+      <div class="btnrow" style="margin-top:6px">
+        <button class="ghost sm" id="btnVars">Variables…</button>
+        <span id="varsSummary" class="hint" style="align-self:center"></span>
       </div>
       <div class="row" style="margin-top:8px">
         <div><label>Lookback (days) <span class="help" data-tip="How many days back to investigate. 90+ is typical for insider-threat and forensic cases.">?</span></label><input id="lookback" type="number" value="90"></div>
@@ -210,6 +224,30 @@
   </div>
 </div>
 
+<!-- Variables modal -->
+<div class="modal" id="varsModal">
+  <div class="box">
+    <span class="x" id="varsClose">&times;</span>
+    <h3>Investigation variables</h3>
+    <div class="hint">These fill query placeholders like {{hostname}}. The entity ({{entity}}) is set on the run form. A query that needs a variable you leave blank is skipped (not failed), so you can run the identity queries first, then fill in the host/agent you discover and re-run.</div>
+    <div class="row">
+      <div><label>Hostname <span class="help" data-tip="{{hostname}} — endpoint/device name, discovered during the identity phase.">?</span></label><input id="v_hostname"></div>
+      <div><label>Agent UUID <span class="help" data-tip="{{agent_uuid}} — SentinelOne agent UUID for the endpoint.">?</span></label><input id="v_agent_uuid"></div>
+    </div>
+    <div class="row">
+      <div><label>IP address <span class="help" data-tip="{{ip}} — a suspicious IP to pivot across sources.">?</span></label><input id="v_ip"></div>
+      <div><label>Username <span class="help" data-tip="{{username}} — OS / login username if different from the email.">?</span></label><input id="v_username"></div>
+    </div>
+    <div class="row">
+      <div><label>Salesforce user ID <span class="help" data-tip="{{sf_user_id}} — the 18-char Salesforce user id.">?</span></label><input id="v_sf_user_id"></div>
+      <div><label>Session <span class="help" data-tip="{{session}} — a session key to reconstruct a session timeline.">?</span></label><input id="v_session"></div>
+    </div>
+    <label>Custom variables <span class="help" data-tip="One per line as name=value. Fills any other {{placeholder}} a catalog uses, including optional config datatable names (dt_*). Leave blank to skip those queries.">?</span></label>
+    <textarea id="v_custom" placeholder="one per line, e.g.&#10;dt_costcenters=CostCenters&#10;dt_accounts_intune=Accounts_intune"></textarea>
+    <button id="btnVarsSave">Save variables</button>
+  </div>
+</div>
+
 <script>
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 function hdrs(){const h={"Content-Type":"application/json"}; if(TOKEN)h["X-Auth-Token"]=TOKEN; return h;}
@@ -219,6 +257,47 @@ async function apiPost(p,b){return (await fetch(p,{method:"POST",headers:hdrs(),
 const $=id=>document.getElementById(id);
 
 let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
+let VARS={};
+try{ VARS=JSON.parse(localStorage.getItem("s1ie_vars")||"{}"); }catch(e){ VARS={}; }
+const KNOWN_VARS=["hostname","agent_uuid","ip","username","sf_user_id","session"];
+
+function renderVarsSummary(){
+  const set=Object.keys(VARS).filter(k=>String(VARS[k]).trim());
+  $("varsSummary").textContent = set.length ? ("variables set: "+set.join(", ")) : "no variables set (entity only)";
+}
+function updateCatVars(){
+  const c=curCat();
+  if(!c||!c.vars||!c.vars.length){ $("catVars").textContent=""; return; }
+  const provided=new Set(["entity",...Object.keys(VARS).filter(k=>String(VARS[k]).trim())]);
+  const unmet=c.vars.filter(v=>!provided.has(v));
+  $("catVars").innerHTML="Needs: "+c.vars.map(v=>unmet.includes(v)
+      ?`<b style="color:var(--amb)">${v}</b>`:`<span style="color:var(--grn)">${v}</span>`).join(", ")
+    + (unmet.length?` — set the missing ones in Variables, or those queries are skipped.`:"");
+}
+$("btnVars").onclick=()=>{
+  KNOWN_VARS.forEach(k=>{ $("v_"+k).value=VARS[k]||""; });
+  $("v_custom").value=Object.entries(VARS).filter(([k])=>!KNOWN_VARS.includes(k)).map(([k,v])=>`${k}=${v}`).join("\n");
+  $("varsModal").classList.add("open");
+};
+$("varsClose").onclick=()=>$("varsModal").classList.remove("open");
+$("varsModal").onclick=e=>{ if(e.target.id==="varsModal")$("varsModal").classList.remove("open"); };
+$("btnVarsSave").onclick=()=>{
+  const v={};
+  KNOWN_VARS.forEach(k=>{ const x=$("v_"+k).value.trim(); if(x)v[k]=x; });
+  ($("v_custom").value||"").split("\n").forEach(line=>{
+    const i=line.indexOf("="); if(i>0){ const k=line.slice(0,i).trim(); const val=line.slice(i+1).trim(); if(k)v[k]=val; }
+  });
+  VARS=v; try{ localStorage.setItem("s1ie_vars",JSON.stringify(VARS)); }catch(e){}
+  renderVarsSummary(); updateCatVars(); $("varsModal").classList.remove("open");
+};
+$("btnRefreshCatalogs").onclick=async()=>{
+  const b=$("btnRefreshCatalogs"); b.disabled=true; b.textContent="Refreshing…";
+  const r=await apiPost("/api/refresh_catalogs",{});
+  b.disabled=false; b.textContent="Refresh from repo";
+  if(r.error){ alert("Refresh failed: "+r.error); return; }
+  await loadConfig();
+  alert(`Refreshed ${r.refreshed} catalog(s) from ${r.repo}`+((r.errors&&r.errors.length)?`\n${r.errors.length} had errors`:""));
+};
 
 async function loadConfig(){
   const c=await apiGet("/api/config");
@@ -232,8 +311,10 @@ async function loadConfig(){
     sel.appendChild(o);
   });
   if(prev)sel.value=prev;
+  sel.onchange=updateCatVars;
   setConn(c.creds_ok,c.console_url,c.num_tokens);
   if(c.console_url&&!$("console").value)$("console").value=c.console_url;
+  renderVarsSummary(); updateCatVars();
 }
 function setConn(ok,url,n){
   $("cdot").className="dot"+(ok?" on":"");
@@ -267,7 +348,8 @@ $("btnRun").onclick=async()=>{
     lookback:parseInt($("lookback").value)||90,sliceDays:parseInt($("sliceDays").value)||1,
     outputDir:$("outputDir").value.trim(),pool:parseInt($("pool").value)||null,
     maxAttempts:parseInt($("maxAttempts").value)||4,subdivide:$("subdivide").checked,
-    useCache:$("useCache").checked,priority:$("priority").value,mock:$("mock").checked,mockThrottle:0};
+    useCache:$("useCache").checked,priority:$("priority").value,mock:$("mock").checked,mockThrottle:0,
+    vars:VARS};
   if(!body.entity){alert("Entity is required");return;}
   const r=await apiPost("/api/run",body);
   if(r.error){alert(r.error);return;}

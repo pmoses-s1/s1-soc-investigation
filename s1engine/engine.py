@@ -133,8 +133,20 @@ class InvestigationEngine:
             "max_attempts": params.max_attempts,
             "scope": scope,
         })
+        provided = {k for k, v in variables.items() if str(v).strip()}
         n = 0
+        runnable = 0
+        skipped = []
         for q in catalog.enabled_queries():
+            missing = [v for v in q.required_vars() if v not in provided]
+            if missing:
+                # Skip a query whose template variables are not set (e.g. an
+                # endpoint query needing {{hostname}} run in the identity phase).
+                # It creates no jobs and is reported as skipped, not failed.
+                skipped.append({"query": q.id, "missing": missing})
+                self._emit({"event": "query_skipped", "query": q.id, "missing": missing})
+                continue
+            runnable += 1
             pq_rendered = q.render(variables)
             for sl in slices:
                 jid = make_job_id(run_id, q.id, sl.key, scope)
@@ -144,7 +156,7 @@ class InvestigationEngine:
                     pq=pq_rendered))
                 n += 1
         self._emit({"event": "planned", "run_id": run_id,
-                          "queries": len(catalog.enabled_queries()),
+                          "queries": runnable, "skipped": len(skipped),
                           "slices": len(slices), "jobs": n})
         return n
 
@@ -366,9 +378,20 @@ class InvestigationEngine:
         results_dir.mkdir(parents=True, exist_ok=True)
         manifest_queries: List[Dict[str, Any]] = []
         by_id = {q.id: q for q in catalog.queries}
+        provided = {"entity"} if params.entity else set()
+        provided |= {k for k, v in (params.variables or {}).items() if str(v).strip()}
 
         for q in catalog.enabled_queries():
             all_jobs = ledger.jobs_for_query(run_id, q.id)
+            if not all_jobs:
+                # No jobs planned = skipped because required template vars were unset.
+                missing = [v for v in q.required_vars() if v not in provided]
+                manifest_queries.append({
+                    "query_id": q.id, "title": q.title, "pq": q.pq,
+                    "status": "skipped", "missing_vars": missing,
+                    "slices_total": 0, "slices_done": 0, "slices_failed": 0,
+                    "slices_permanent": 0, "result_rows": 0, "warnings": []})
+                continue
             done_jobs = [j for j in all_jobs if j.state == STATE_DONE]
             # The rendered PowerQuery that actually ran (entity substituted) is stored
             # on every job; carry it through so it lands in the results and workbook.

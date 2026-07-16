@@ -1,0 +1,186 @@
+name: 'DFIR: SaaS & apps'
+queries:
+- id: sfd-01
+  title: Salesforce Source Coverage
+  notes: 'Which Salesforce feeds contain this user? Use this before source-specific Salesforce queries. | Source: salesforce-* | Pivot if positive: Use result to decide realtime vs event vs audit follow-up.'
+  pq: |-
+    serverHost in ('salesforce-realtime','salesforce_event','salesforce_audit')
+    | filter (detail.payload.Username contains:anycase("{{entity}}") or detail.payload.UserId contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or USER_ID_DERIVED contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or CreatedById contains:anycase("{{entity}}") or account contains:anycase("{{entity}}"))
+       OR (detail.payload.Username contains:anycase('{{username}}') or username contains:anycase('{{username}}'))
+       OR (detail.payload.UserId contains:anycase("{{sf_user_id}}") or USER_ID contains:anycase("{{sf_user_id}}") or USER_ID_DERIVED contains:anycase("{{sf_user_id}}") or CreatedById contains:anycase("{{sf_user_id}}"))
+    | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp) by Source=serverHost
+    | sort -EventCount
+- id: sfd-02
+  title: Salesforce Realtime Login Activity
+  notes: 'Where and how did the user authenticate to Salesforce? | Source: salesforce-realtime | Pivot if positive: Pivot LoginKey/SessionKey to SFD-07.'
+  pq: |-
+    serverHost='salesforce-realtime' detail-type='LoginEventStream'
+    | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
+    | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Username=detail.payload.Username, UserId=detail.payload.UserId, LoginType=detail.payload.LoginType, App=detail.payload.Application, Browser=detail.payload.Browser, Platform=detail.payload.Platform, IP=detail.payload.SourceIp, Country=detail.payload.Country, City=detail.payload.City, Status=detail.payload.Status, LoginKey=detail.payload.LoginKey, SessionKey=detail.payload.SessionKey
+    | sort -Time
+    | limit 2000
+- id: sfd-03
+  title: Salesforce Report / Row Volume Activity
+  notes: 'Did the user run reports or high-row-return activity? | Source: salesforce-realtime | Pivot if positive: Large RowsProcessed/RowsReturned -> review report name/query and business justification.'
+  pq: |-
+    serverHost='salesforce-realtime'
+    | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
+    | filter detail-type contains:anycase('Report') OR detail.payload.ReportId != null OR detail.payload.RowsProcessed != null OR detail.payload.RowsReturned != null
+    | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DetailType=detail-type, Operation=detail.payload.Operation, Name=detail.payload.Name, ReportId=detail.payload.ReportId, RowsProcessed=detail.payload.RowsProcessed, RowsReturned=detail.payload.RowsReturned, Format=detail.payload.Format, IP=detail.payload.SourceIp, LoginKey=detail.payload.LoginKey, Query=detail.payload.Query
+    | sort -Time
+    | limit 2000
+- id: sfd-04
+  title: Salesforce SOQL / Queried Entities
+  notes: 'What objects/entities did the user or connected app query? | Source: salesforce-realtime | Pivot if positive: Pivot ConnectedAppId, Query, or LoginKey.'
+  pq: |-
+    serverHost='salesforce-realtime'
+    | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
+    | filter detail.payload.Query != null OR detail.payload.QueriedEntities != null OR detail.payload.Operation != null
+    | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Operation=detail.payload.Operation, Entities=detail.payload.QueriedEntities, Query=detail.payload.Query, Rows=detail.payload.Records.totalSize, RowsReturned=detail.payload.RowsReturned, IP=detail.payload.SourceIp, ApiType=detail.payload.ApiType, App=detail.payload.AppName, ConnectedAppId=detail.payload.ConnectedAppId
+    | sort -Time
+    | limit 2000
+- id: sfd-05
+  title: Salesforce Event Monitoring API / URI Activity
+  notes: 'Correlate Salesforce EventLogFile style activity using USER_ID/SESSION_KEY/LOGIN_KEY. | Source: salesforce_event | Pivot if positive: Use SESSION_KEY and LOGIN_KEY for same-session timeline.'
+  pq: |-
+    serverHost='salesforce_event'
+    | filter USER_ID='{{sf_user_id}}' OR USER_ID_DERIVED='{{sf_user_id}}' OR username contains:anycase('{{username}}')
+    | let ts=(TIMESTAMP_DERIVED || TIMESTAMP || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=EVENT_TYPE, UserId=USER_ID, DerivedUser=USER_ID_DERIVED, ClientIP=CLIENT_IP, ClientName=CLIENT_NAME, ConnectedApp=CONNECTED_APP_ID, Method=HTTP_METHOD, Entity=ENTITY_NAME, URI=URI, Query=QUERY, Status=REQUEST_STATUS, LoginKey=LOGIN_KEY, SessionKey=SESSION_KEY, UserAgent=USER_AGENT
+    | sort -Time
+    | limit 5000
+- id: sfd-06
+  title: Salesforce Setup Audit Changes
+  notes: 'Did the user make setup/security/config changes? | Source: salesforce_audit | Pivot if positive: Privilege changes -> SFD-09 and Okta/admin correlation.'
+  pq: |-
+    serverHost='salesforce_audit'
+    | filter username contains:anycase('{{username}}') OR CreatedById='{{sf_user_id}}' OR DelegateUser contains:anycase('{{username}}')
+    | let ts=(CreatedDate || SystemModstamp || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Username=username, CreatedById=CreatedById, Action=Action, Section=Section, Display=Display, DelegateUser=DelegateUser, ResponsibleNamespacePrefix=ResponsibleNamespacePrefix
+    | sort -Time
+    | limit 5000
+- id: sfd-07
+  title: Salesforce Session Pivot
+  notes: 'Reconstruct all Salesforce activity for a LoginKey/SessionKey across realtime + event feeds. | Source: salesforce-realtime, salesforce_event | Pivot if positive: Export raw results as session evidence.'
+  pq: |-
+    serverHost in ('salesforce-realtime','salesforce_event')
+    | filter detail.payload.LoginKey='%LOGIN_KEY%' OR detail.payload.SessionKey='%SESSION_KEY%' OR LOGIN_KEY='%LOGIN_KEY%' OR SESSION_KEY='%SESSION_KEY%'
+    | let ts=(detail.payload.EventDate || TIMESTAMP_DERIVED || time || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, DetailType=detail-type, EventType=EVENT_TYPE, Username=detail.payload.Username, UserId=detail.payload.UserId, Operation=detail.payload.Operation, EventName=detail.payload.Name, Entity=ENTITY_NAME, URI=URI, IP=detail.payload.SourceIp, ClientIP=CLIENT_IP, Query=detail.payload.Query
+    | sort Time
+    | limit 10000
+- id: sfd-08
+  title: Salesforce File / Content Activity
+  notes: 'Look for content/file actions, versions, and content size. | Source: salesforce-realtime | Pivot if positive: Correlate with ZIA/endpoint uploads and report events.'
+  pq: |-
+    serverHost='salesforce-realtime'
+    | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
+    | filter detail.payload.FileAction != null OR detail.payload.ContentSize != null OR detail.payload.FileType != null OR detail-type contains:anycase('File')
+    | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DetailType=detail-type, Name=detail.payload.Name, FileAction=detail.payload.FileAction, FileType=detail.payload.FileType, ContentSize=detail.payload.ContentSize, VersionId=detail.payload.VersionId, SourceIp=detail.payload.SourceIp, UserAgent=detail.payload.UserAgent
+    | sort -Time
+    | limit 2000
+- id: sfd-09
+  title: Salesforce Privilege / Connected App Changes
+  notes: 'Find security-sensitive setup changes involving permissions, profiles, roles, sessions, or connected apps. | Source: salesforce_audit | Pivot if positive: Correlate with Okta, IP, and approver/change-ticket evidence.'
+  pq: |-
+    serverHost='salesforce_audit'
+    | filter (username contains:anycase('{{username}}') OR CreatedById='{{sf_user_id}}' OR DelegateUser contains:anycase('{{username}}'))
+    | filter Action contains:anycase('permission','profile','role','user','login','session','token','connected','app') OR Section contains:anycase('security','users','permission','profile','session','login') OR Display contains:anycase('Permission','Profile','Role','Connected App','Session')
+    | let ts=(CreatedDate || SystemModstamp || timestamp || sca:ingestTime)
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Username=username, CreatedById=CreatedById, Action=Action, Section=Section, Display=Display, DelegateUser=DelegateUser
+    | sort -Time
+    | limit 5000
+- id: psc-01
+  title: Prompt Security — All Activity
+  notes: 'What AI tool activity did the user have via the corporate Prompt Security gateway? | Source: prompt-security | Pivot if positive: text_action events with high latency or violations → PSC-02'
+  pq: |-
+    serverHost='prompt-security' log.user='{{entity}}'
+    | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime)
+    | sort -ts
+    | limit 2000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=log.user, App=log.application.name, Direction=log.direction, EventType=log.eventType, Domain=log.sensor.pageDomain, Policy=log.policyName, IP=log.ipAddress, ConvID=log.conversationId
+- id: psc-02
+  title: Prompt Security — Data Laundering / Violations
+  notes: 'Did the user send secrets, sensitive data, or policy-violating content to AI tools? | Source: prompt-security | Pivot if positive: Secret findings + departing user = escalate. Use ConvID to retrieve full conversation if needed'
+  pq: |-
+    serverHost='prompt-security' log.user='{{entity}}'
+    | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime)
+    | let Violations=string(log.violations)
+    | let Secrets=string(log.violationFindingsDetails.Secrets)
+    | let Sensitive=string(log.violationFindingsDetails['Sensitive Data'])
+    | filter log.eventType == 'text_action'
+    | filter log.latency >= 1000 OR (!isempty(Violations) && Violations != '[]') OR (!isempty(Secrets) && Secrets != '[]') OR (!isempty(Sensitive) && Sensitive != '[]')
+    | sort -ts
+    | limit 1000
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=log.user, App=log.application.name, Domain=log.sensor.pageDomain, Policy=log.policyName, Secrets, Sensitive, Violations, Latency=log.latency, ConvID=log.conversationId, PromptID=log.promptResponseId
+- id: trv-01
+  title: Navan Travel Bookings
+  notes: 'What business travel did the user book? Corroborates geo anomalies in Okta/ZPA. | Source: navan-travel-bookings | Pivot if positive: Trip destination + dates → Okta location in same window for corroboration'
+  pq: |-
+    serverHost='navan-travel-bookings'
+    | filter passengers.person.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{username}}') OR booker.email contains:anycase('{{entity}}')
+    | let ts=(timestamp || created || lastModified || sca:ingestTime)
+    | sort -ts
+    | limit 500
+    | columns Created=simpledateformat(ts,'yyyy-MM-dd'), TripName=tripName, Type=bookingType, Status=bookingStatus, Vendor=vendor, StartDate=startDate, EndDate=endDate, Purpose=purpose, Origin=origin.city, Destination=destination.city
+- id: git-01
+  title: GitHub Identity Coverage
+  notes: 'Which GitHub sources have activity for this user or likely GitHub username/email? | Source: ghe_server_prod/ghe_server_dev/github_org_auth/github_s3 | Pivot if positive: Repo clone/download, token, org auth, non-Snyk activity queries'
+  pq: |-
+    serverHost in ('ghe_server_prod','ghe_server_dev','github_org_auth','github_s3')
+    | filter actor contains:anycase('{{username}}') OR user contains:anycase('{{username}}') OR actor.email contains:anycase('{{entity}}')
+    | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp), Actions=array_agg_distinct(action, 20), Repos=array_agg_distinct(repo, 20) by Source=serverHost
+    | sort -EventCount
+    | limit 100
+- id: git-02
+  title: GitHub Repo Download / Clone / Zip
+  notes: 'Did the user download or clone repositories? | Source: ghe_server_prod/github_s3 | Pivot if positive: ZIA egress, endpoint archive/staging, Snyk integration activity'
+  pq: |-
+    serverHost in ('ghe_server_prod','github_s3')
+    | filter actor contains:anycase('{{username}}') OR actor.email contains:anycase('{{entity}}')
+    | filter action contains:anycase('download') OR action contains:anycase('clone') OR action contains:anycase('fetch') OR action='repo.download_zip'
+    | sort -timestamp
+    | limit 2000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor, Action=action, Repo=repo, IP=actor_ip, UserAgent=user_agent, TokenType=programmatic_access_type
+- id: git-03
+  title: GitHub Token / OAuth Activity
+  notes: 'Were PATs/OAuth/GitHub Apps used or modified? | Source: ghe_server_prod/github_org_auth/github_s3 | Pivot if positive: Scope by hashed_token across all GitHub events'
+  pq: |-
+    serverHost in ('ghe_server_prod','github_org_auth','github_s3')
+    | filter actor contains:anycase('{{username}}') OR actor.email contains:anycase('{{entity}}')
+    | filter action contains:anycase('token') OR action contains:anycase('oauth') OR programmatic_access_type != null
+    | sort -timestamp
+    | limit 2000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor, Action=action, Repo=repo, IP=actor_ip, TokenType=programmatic_access_type, Token=hashed_token, Scopes=token_scopes, UA=user_agent
+- id: saa-01
+  title: Broad SaaS Coverage
+  notes: 'Which secondary SaaS apps show activity for this user? | Source: Zoom/Figma/NetSuite/PagerDuty/Asana/Monday/Clari/Contentstack/GoAnywhere | Pivot if positive: Run app-specific query below or source dashboard'
+  pq: |-
+    serverHost in ('zoom','zoom_signin','zoom_meeting_details_jh','zoom_meeting_user','figma','netsuite','pagerduty','asana_audit_log_jh','monday_audit_log_jh','clari_audit_log_jh','contentstack','goanywheremft')
+    | filter (actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+    | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp), Events=array_agg_distinct(event.name || action || event_type, 20) by Source=serverHost
+    | sort -EventCount
+    | limit 100
+- id: saa-02
+  title: Figma Export / Link Changes
+  notes: 'Figma file exports, image downloads, link changes, token activity. | Source: figma | Pivot if positive: ZIA, endpoint downloads, external sharing'
+  pq: |-
+    serverHost='figma'
+    | filter actor.email contains:anycase('{{entity}}')
+    | filter action.type contains:anycase('export') OR action.type contains:anycase('download') OR action.type contains:anycase('link') OR action.type contains:anycase('access_token')
+    | sort -timestamp
+    | limit 2000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Action=action.type, Entity=entity.type, Key=entity.key, IP=context.ip_address, Client=context.client_name
+- id: saa-03
+  title: Zoom Sign-in / Admin Changes
+  notes: 'Zoom sign-ins/admin actions for user/operator. | Source: zoom/zoom_signin | Pivot if positive: Okta SSO and endpoint'
+  pq: |-
+    serverHost in ('zoom','zoom_signin')
+    | filter email contains:anycase('{{entity}}') OR operator contains:anycase('{{entity}}')
+    | sort -timestamp
+    | limit 2000
+    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Email=email, Operator=operator, Action=action, Category=category_type, IP=ip_address, Client=client_type, Detail=operation_detail
