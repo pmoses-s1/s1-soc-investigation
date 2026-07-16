@@ -17,5 +17,6 @@ ENVFILE=()
 [ -f .env ] && ENVFILE=(--env-file .env)
 
 echo "s1-soc-investigation -> http://localhost:${HOST_PORT}   (output: ${OUT})"
-exec docker run --rm -p "127.0.0.1:${HOST_PORT}:8801" \
+# --pull=always so you always run the newest published image, not a stale cached :latest.
+exec docker run --rm --pull=always -p "127.0.0.1:${HOST_PORT}:8801" \
   -v "${OUT}:/data" "${ENVFILE[@]}" "$IMAGE"

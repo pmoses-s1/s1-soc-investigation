@@ -12,18 +12,19 @@ and get a verification report that proves nothing was skipped, plus a workbook a
 ## Install and run (Docker, one command)
 
 ```bash
-docker run --rm -p 127.0.0.1:8901:8801 \
+docker run --rm --pull=always -p 127.0.0.1:8901:8801 \
   -v "$PWD/investigations:/data" \
   ghcr.io/pmoses-s1/s1-soc-investigation:latest
 ```
 
-Then open **http://localhost:8901**. `docker run` pulls the image automatically the first time, so
-there is no separate `docker pull`. The `-v` mount is your output folder: everything the engine writes
-lands in `./investigations` on your machine. Enter credentials in the Connect panel, or preload them:
+Then open **http://localhost:8901**. The `--pull=always` flag makes Docker fetch the newest published
+image every time; without it, `docker run` reuses whatever `:latest` you already have cached and never
+picks up new builds. The `-v` mount is your output folder: everything the engine writes lands in
+`./investigations` on your machine. Enter credentials in the Connect panel, or preload them:
 
 ```bash
 cp .env.example .env      # fill in S1_CONSOLE_URL and S1_LRQ_TOKENS, then:
-docker run --rm -p 127.0.0.1:8901:8801 -v "$PWD/investigations:/data" \
+docker run --rm --pull=always -p 127.0.0.1:8901:8801 -v "$PWD/investigations:/data" \
   --env-file .env ghcr.io/pmoses-s1/s1-soc-investigation:latest
 ```
 
@@ -38,7 +39,7 @@ drives privileged SDL queries with your token and is unauthenticated by default,
 other hosts you must opt in and set a token:
 
 ```bash
-docker run --rm -p 8901:8801 -e S1IE_BIND_ALL=1 -e S1IE_AUTH_TOKEN=<strong-secret> \
+docker run --rm --pull=always -p 8901:8801 -e S1IE_BIND_ALL=1 -e S1IE_AUTH_TOKEN=<strong-secret> \
   -v "$PWD/investigations:/data" --env-file .env ghcr.io/pmoses-s1/s1-soc-investigation:latest
 # then open  http://<host>:8901/?token=<strong-secret>
 ```

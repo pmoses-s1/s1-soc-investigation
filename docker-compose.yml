@@ -6,7 +6,9 @@
 services:
   s1-soc-investigation:
     build: .
-    image: s1-soc-investigation:latest
+    image: ghcr.io/pmoses-s1/s1-soc-investigation:latest
+    # Always fetch the newest published image on `up` (ignored when building locally).
+    pull_policy: always
     container_name: s1-soc-investigation
     ports:
       # host loopback only -> container. Change to "8901:8801" only when exposing with a token.
