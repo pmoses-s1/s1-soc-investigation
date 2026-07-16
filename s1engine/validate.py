@@ -13,6 +13,7 @@ so a query that validates here will not be marked `permanent` mid-run.
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -43,6 +44,11 @@ def validate_catalog(config: EngineConfig, catalog: Catalog, *,
                        name="validator", poll_interval_s=config.poll_interval_s,
                        query_timeout_s=min(30.0, config.query_timeout_s))
 
+    # Validation = "does SDL accept and start this query?" We launch it and poll
+    # briefly. A 400 rejection (unknown function, bad command) is INVALID. A query
+    # that parses and starts is VALID, even if it is still running when the short
+    # budget elapses (a slow query is not a broken query).
+    budget = min(12.0, max(4.0, config.query_timeout_s))
     results: List[Dict[str, Any]] = []
     for q in catalog.enabled_queries():
         try:
@@ -52,19 +58,42 @@ def validate_catalog(config: EngineConfig, catalog: Catalog, *,
                             "error": f"template error: {e}"})
             continue
         try:
-            res = client.run_pq(pq, start_iso, end_iso,
-                                tenant=config.tenant,
-                                account_ids=config.account_ids or None, priority="LOW")
-            results.append({"query_id": q.id, "title": q.title, "status": "valid",
-                            "error": "", "rows": res.row_count,
-                            "match_count": res.match_count})
+            qid, tag = client.launch(pq, start_iso, end_iso, tenant=config.tenant,
+                                     account_ids=config.account_ids or None, priority="LOW")
         except QuerySyntaxError as e:
             results.append({"query_id": q.id, "title": q.title, "status": "invalid",
                             "error": str(e)[:300]})
-        except (RateLimitError, ServerError) as e:
+            continue
+        except (RateLimitError, ServerError, LRQError) as e:
             results.append({"query_id": q.id, "title": q.title, "status": "unknown",
-                            "error": f"transient, could not validate now: {str(e)[:200]}"})
-        except LRQError as e:
-            results.append({"query_id": q.id, "title": q.title, "status": "unknown",
-                            "error": str(e)[:200]})
+                            "error": f"could not reach SDL: {str(e)[:200]}"})
+            continue
+
+        deadline = time.monotonic() + budget
+        last_seen = 0
+        result = {"query_id": q.id, "title": q.title, "status": "valid",
+                  "error": "accepted (still running at validation cutoff)"}
+        try:
+            while time.monotonic() < deadline:
+                resp = client.poll(qid, tag, last_seen)
+                total = int(resp.get("stepsTotal") or 0)
+                done = int(resp.get("stepsCompleted") or 0)
+                last_seen = done
+                if total > 0 and done >= total:
+                    data = resp.get("data") or {}
+                    result = {"query_id": q.id, "title": q.title, "status": "valid",
+                              "error": "", "rows": len(data.get("values") or []),
+                              "match_count": int(data.get("matchCount")
+                                                 or resp.get("matchCount") or 0)}
+                    break
+                time.sleep(1.0)
+        except QuerySyntaxError as e:
+            result = {"query_id": q.id, "title": q.title, "status": "invalid",
+                      "error": str(e)[:300]}
+        except (RateLimitError, ServerError, LRQError) as e:
+            result = {"query_id": q.id, "title": q.title, "status": "unknown",
+                      "error": str(e)[:200]}
+        finally:
+            client.cancel(qid, tag)
+        results.append(result)
     return results

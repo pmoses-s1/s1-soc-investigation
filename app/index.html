@@ -25,7 +25,8 @@
   header{display:flex;align-items:center;gap:16px;padding:18px 28px;background:var(--surface);
     box-shadow:0 6px 18px rgba(123,92,246,.10);position:relative;z-index:2}
   header .logo{width:40px;height:40px;border-radius:13px;background:linear-gradient(135deg,var(--pur),var(--mag));
-    box-shadow:0 6px 16px rgba(123,92,246,.42),var(--nm-out-sm)}
+    box-shadow:0 6px 16px rgba(123,92,246,.42),var(--nm-out-sm);
+    display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:15px;letter-spacing:.5px}
   header h1{font-size:18px;margin:0;font-weight:700;letter-spacing:.2px;color:var(--txt)}
   header .sub{color:var(--hint);font-size:12.5px}
   header .conn{margin-left:auto;font-size:12px;color:var(--mut);border-radius:20px;padding:8px 16px;
@@ -101,7 +102,7 @@
 </head>
 <body>
 <header>
-  <div class="logo"></div>
+  <div class="logo">S1</div>
   <div>
     <h1>SentinelOne SOC Investigation</h1>
     <div class="sub">Long-lookback query execution engine for Singularity Data Lake</div>
@@ -112,8 +113,12 @@
 <div class="wrap">
   <div>
     <!-- Connect -->
-    <div class="card">
-      <h2>Connect</h2>
+    <div class="card" id="connectCard">
+      <h2 style="display:flex;align-items:center">Connect
+        <span id="connectEditWrap" style="margin-left:auto;display:none"><button class="ghost sm" id="connectEdit">Edit</button></span>
+      </h2>
+      <div id="connectSummary" class="kv" style="display:none"></div>
+      <div id="connectBody">
       <label>Console URL <span class="help" data-tip="Your tenant's console host for the LRQ v2 API, e.g. https://your-tenant.sentinelone.net. This is NOT the xdr.* V1 address.">?</span></label>
       <input id="console" placeholder="https://your-tenant.sentinelone.net">
       <label>Service-user tokens <span class="help" data-tip="One or more console service-user JWTs. Put one per line to round-robin across identities, which multiplies the ~3 requests/sec per-user limit. Tokens stay on the server and are never sent back to the browser.">?</span></label>
@@ -123,6 +128,7 @@
         <div><label>Account IDs <span class="help" data-tip="Optional, comma-separated. Scopes the query to these accounts (sets tenant=false). Use this if a tenant-wide query returns zero rows on a multi-account tenant.">?</span></label><input id="accts" placeholder="optional"></div>
       </div>
       <button id="btnConnect">Connect</button>
+      </div>
     </div>
 
     <!-- Run -->
@@ -227,7 +233,22 @@ async function loadConfig(){
 function setConn(ok,url,n){
   $("cdot").className="dot"+(ok?" on":"");
   $("cstat").textContent=ok?`connected · ${n} token${n==1?"":"s"}`:"not connected";
+  // Collapse the Connect panel once connected; reopen via Edit.
+  if(ok){
+    $("connectBody").style.display="none";
+    $("connectSummary").style.display="block";
+    $("connectSummary").textContent=`Connected to ${url||"tenant"} · ${n} token${n==1?"":"s"}`;
+    $("connectEditWrap").style.display="block";
+  }else{
+    $("connectBody").style.display="block";
+    $("connectSummary").style.display="none";
+    $("connectEditWrap").style.display="none";
+  }
 }
+$("connectEdit").onclick=()=>{
+  $("connectBody").style.display="block";
+  $("connectSummary").style.display="none";
+};
 function curCat(){return CATALOGS.find(c=>c.path===$("catalog").value);}
 
 $("btnConnect").onclick=async()=>{

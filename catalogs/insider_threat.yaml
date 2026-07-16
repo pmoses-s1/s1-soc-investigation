@@ -21,11 +21,11 @@ queries:
       dataSource.name='Windows Event Logs'
       winEventLog.description contains:anycase("{{entity}}")
       winEventLog.id in (4624,4625)
-      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
-      | sort event_day
+      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by day=timebucket("1d")
+      | sort day
     merge:
       kind: aggregate
-      key_cols: [event_day]
+      key_cols: [day]
       sum_cols: [hits]
       min_cols: [first_seen]
       max_cols: [last_seen]
@@ -36,11 +36,11 @@ queries:
       dataSource.name='Windows Event Logs'
       winEventLog.id=4625
       winEventLog.description contains:anycase("{{entity}}")
-      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
+      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by day=timebucket("1d")
       | sort -hits
     merge:
       kind: aggregate
-      key_cols: [event_day]
+      key_cols: [day]
       sum_cols: [hits]
       min_cols: [first_seen]
       max_cols: [last_seen]
@@ -51,11 +51,11 @@ queries:
       dataSource.category='network'
       src.user.name contains:anycase("{{entity}}")
       event.dns.request=*
-      | group hits=count(), uniq_domains=estimate_distinct(event.dns.request), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
-      | sort event_day
+      | group hits=count(), uniq_domains=estimate_distinct(event.dns.request), first_seen=min(event.time), last_seen=max(event.time) by day=timebucket("1d")
+      | sort day
     merge:
       kind: aggregate
-      key_cols: [event_day]
+      key_cols: [day]
       sum_cols: [hits]
       min_cols: [first_seen]
       max_cols: [last_seen]
@@ -67,11 +67,11 @@ queries:
       dataSource.category='network'
       src.user.name contains:anycase("{{entity}}")
       direction='out'
-      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by event_day=formatTimestamp("%Y-%m-%d", event.time)
-      | sort event_day
+      | group hits=count(), first_seen=min(event.time), last_seen=max(event.time) by day=timebucket("1d")
+      | sort day
     merge:
       kind: aggregate
-      key_cols: [event_day]
+      key_cols: [day]
       sum_cols: [hits]
       min_cols: [first_seen]
       max_cols: [last_seen]

@@ -71,8 +71,11 @@ def classify_http(status: int, body: Any) -> Optional[LRQError]:
         return RateLimitError(msg or "rate limited", status, body)
     if 500 <= status < 600:
         return ServerError(msg or f"server error {status}", status, body)
-    if status == 400 and any(m in low for m in _SYNTAX_MARKERS):
-        return QuerySyntaxError(msg or "query syntax error", status, body)
+    if status == 400:
+        # A 400 is a client-side rejection of the query/params (unknown function,
+        # bad command, wrong scope). It is never transient, so treat every 400 as
+        # a permanent query error. _SYNTAX_MARKERS is kept for message context.
+        return QuerySyntaxError(msg or "bad request (400)", status, body)
     if status >= 400:
         return LRQError(msg or f"http {status}", status, body)
     return None
