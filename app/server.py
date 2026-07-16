@@ -212,8 +212,8 @@ def start_run(d: dict) -> dict:
 
     reg = {"run_id": run_id, "case": case, "entity": entity, "run_dir": str(run_dir),
            "catalog": catalog.name, "status": "running", "activity": activity,
-           "verification": None, "stats": None, "workbook": None, "error": None,
-           "started_at": datetime.now(timezone.utc).isoformat()}
+           "engine": engine, "verification": None, "stats": None, "workbook": None,
+           "error": None, "started_at": datetime.now(timezone.utc).isoformat()}
     with _RUNS_LOCK:
         _RUNS[run_id] = reg
 
@@ -229,7 +229,10 @@ def start_run(d: dict) -> dict:
             reg["cache"] = result.get("cache")
             reg["verification"] = v.to_dict()
             reg["manifest"] = manifest
-            reg["status"] = "complete" if v.passed else "incomplete"
+            if result.get("cancelled"):
+                reg["status"] = "cancelled"
+            else:
+                reg["status"] = "complete" if v.passed else "incomplete"
             activity.log({"event": "verification", "passed": v.passed,
                           "passed_queries": v.passed_queries,
                           "total_queries": v.total_queries})
@@ -389,6 +392,14 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, creds_status())
             if p == "/api/run":
                 return self._send(200, start_run(d))
+            if p == "/api/cancel":
+                reg = _RUNS.get(d.get("runId"))
+                if not reg:
+                    return self._send(404, {"error": "unknown run"})
+                if reg["status"] != "running":
+                    return self._send(200, {"status": reg["status"], "note": "run not active"})
+                reg["engine"].request_cancel()
+                return self._send(200, {"status": "cancelling"})
             if p == "/api/catalog_save":
                 return self._send(200, save_catalog(d))
             if p == "/api/validate":

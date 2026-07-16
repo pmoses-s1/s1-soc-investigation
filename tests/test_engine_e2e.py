@@ -116,3 +116,25 @@ def test_resume_retries_failed_slices_on_second_run(tmp_path):
     v2 = verify_run(led, run_id, cat)
     assert v2.passed
     led.close()
+
+
+def test_cancel_leaves_slices_pending_and_is_resumable(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    run_id = "run-c"
+    params = RunParams(case_id="C", entity="erin", lookback_days=2, slice_days=1)
+
+    # Cancel before any slice runs: everything stays pending, run reports cancelled.
+    eng = _engine(tmp_path, FakeTransport())
+    eng.plan(run_id, _catalog(), params, led)
+    eng.request_cancel()
+    result = eng.run(run_id, led, params)
+    assert result["cancelled"] is True
+    assert result["stats"]["done"] == 0
+    assert not verify_run(led, run_id, _catalog()).passed
+
+    # Resume with a fresh engine (no cancel): the pending slices complete.
+    eng2 = _engine(tmp_path, FakeTransport())
+    eng2.run(run_id, led, params)
+    eng2.finalize(run_id, led, _catalog(), params)
+    assert verify_run(led, run_id, _catalog()).passed
+    led.close()

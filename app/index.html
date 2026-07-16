@@ -171,6 +171,7 @@
       </div>
       <div class="chk"><input id="mock" type="checkbox"><label>Dry run (offline mock) <span class="help" data-tip="Run offline against a built-in fake backend to try the whole flow without a tenant or credentials.">?</span></label></div>
       <button id="btnRun">Start investigation</button>
+      <button class="ghost" id="btnCancel" style="display:none;width:100%;margin-top:8px">Cancel run (resumable)</button>
     </div>
   </div>
 
@@ -275,13 +276,21 @@ $("btnRun").onclick=async()=>{
   $("runlabel").textContent="· "+r.run_id;
   $("verdict").innerHTML='<span class="badge run">RUNNING</span> <span class="muted">'+r.run_dir+'</span>';
   $("btnRun").disabled=true;
+  const cb=$("btnCancel"); cb.style.display="block"; cb.disabled=false; cb.textContent="Cancel run (resumable)";
   if(POLL)clearInterval(POLL); POLL=setInterval(poll,1000); poll();
+};
+
+$("btnCancel").onclick=async()=>{
+  if(!CURRENT)return;
+  $("btnCancel").disabled=true; $("btnCancel").textContent="Cancelling…";
+  await apiPost("/api/cancel",{runId:CURRENT});
 };
 
 function addLine(ev){
   const box=$("log");
   const cls={slice_done:"ok",slice_cached:"cache",slice_failed:"fail",permanent:"perm",subdivided:"warn",
-    verification:"info",resume:"info",planned:"info",finalized:"info",workbook:"info",warning:"warn",error:"fail"}[ev.event]||"";
+    verification:"info",resume:"info",planned:"info",finalized:"info",workbook:"info",warning:"warn",
+    cancelling:"warn",cancelled:"warn",error:"fail"}[ev.event]||"";
   const t=new Date((ev.ts||0)*1000).toLocaleTimeString();
   const div=document.createElement("div"); div.className="le "+cls;
   div.innerHTML=`<span class="t">${t}</span> <span class="m">${fmt(ev)}</span>`;
@@ -296,6 +305,8 @@ function fmt(e){switch(e.event){
   case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
   case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
   case"workbook":return `workbook → ${e.path}`;
+  case"cancelling":return "cancel requested — stopping after in-flight slices finish";
+  case"cancelled":return `cancelled (done ${e.done}); re-run the same case to resume`;
   case"warning":return `warn: ${e.msg}`;
   case"finalized":return `finalized (complete=${e.complete})`;
   case"verification":return `verification: ${e.passed?"PASS":"ATTENTION"} ${e.passed_queries}/${e.total_queries}`;
@@ -306,7 +317,7 @@ async function poll(){
   const a=await apiGet(`/api/activity?runId=${encodeURIComponent(CURRENT)}&since=${LASTSEQ}`);
   (a.events||[]).forEach(ev=>{LASTSEQ=Math.max(LASTSEQ,ev.seq);addLine(ev);});
   if(a.status&&a.status!=="running"){
-    clearInterval(POLL);POLL=null;$("btnRun").disabled=false;
+    clearInterval(POLL);POLL=null;$("btnRun").disabled=false;$("btnCancel").style.display="none";
     renderVerification(await apiGet(`/api/status?runId=${encodeURIComponent(CURRENT)}`));
   }
 }
@@ -315,8 +326,11 @@ function renderVerification(s){
   if(s.status==="error"){$("verdict").innerHTML='<span class="badge bad">ERROR</span> <span class="muted">'+(s.error||"")+'</span>';return;}
   const v=s.verification;
   if(!v){$("verdict").innerHTML='<span class="badge warn">'+s.status.toUpperCase()+'</span>';return;}
-  $("verdict").innerHTML=(v.passed?'<span class="badge ok">PASS — all queries completed</span>'
-    :'<span class="badge bad">ATTENTION — incomplete</span>')+` <span class="muted">${v.passed_queries}/${v.total_queries} queries passed</span>`;
+  const verdict = s.status==="cancelled"
+    ? '<span class="badge warn">CANCELLED — resumable (re-run the same case to continue)</span>'
+    : (v.passed?'<span class="badge ok">PASS — all queries completed</span>'
+              :'<span class="badge bad">ATTENTION — incomplete</span>');
+  $("verdict").innerHTML=verdict+` <span class="muted">${v.passed_queries}/${v.total_queries} queries passed</span>`;
   const rid=encodeURIComponent(CURRENT);
   $("downloads").innerHTML=
     `<a href="/api/activity_log?runId=${rid}${tq()}"><button class="ghost sm">↓ Activity log (.jsonl)</button></a>`+

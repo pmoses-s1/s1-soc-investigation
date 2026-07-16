@@ -98,6 +98,15 @@ class InvestigationEngine:
         self._pool_size = max(initial, len(self.clients) * 3)
         self._rr = 0
         self._rr_lock = threading.Lock()
+        # Cooperative cancel: set from another thread to stop launching new slices.
+        self._cancel = threading.Event()
+
+    def request_cancel(self) -> None:
+        """Signal a cooperative stop. In-flight slices finish; no new ones start.
+        Pending slices are left pending, so the run stays fully resumable."""
+        if not self._cancel.is_set():
+            self._cancel.set()
+            self._emit({"event": "cancelling"})
 
     def _emit(self, event: Dict[str, Any]) -> None:
         """Persist every event to the activity log and forward to the live callback."""
@@ -188,7 +197,10 @@ class InvestigationEngine:
                     work.task_done()
                     return
                 try:
-                    self._process_job(job, ledger, params, stats, enqueue)
+                    if self._cancel.is_set():
+                        pass  # cancel requested: leave this job pending (resumable)
+                    else:
+                        self._process_job(job, ledger, params, stats, enqueue)
                 finally:
                     with out_lock:
                         outstanding["n"] -= 1
@@ -207,9 +219,13 @@ class InvestigationEngine:
             t.join()
 
         cov = ledger.coverage(run_id)
-        ledger.set_run_status(run_id, "complete" if cov["complete"] else "incomplete")
+        cancelled = self._cancel.is_set()
+        status = "cancelled" if cancelled else ("complete" if cov["complete"] else "incomplete")
+        ledger.set_run_status(run_id, status)
+        if cancelled:
+            self._emit({"event": "cancelled", "done": stats["done"]})
         return {"stats": stats, "total": total, "coverage": cov,
-                "cache": self.cache.stats()}
+                "cache": self.cache.stats(), "cancelled": cancelled}
 
     def _process_job(self, job: Job, ledger: Ledger, params: RunParams,
                      stats: Dict[str, int], enqueue: Callable[[Job], None]) -> None:
