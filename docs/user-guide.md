@@ -47,20 +47,22 @@ to a one-line summary with an **Edit** button.
 
 ## 3. Choose and validate the catalog
 
-![Run investigation panel](images/02-run.png)
+![Top of the run panel: case, entity, catalog, and variables](images/02-run.png)
 
-Pick a **query catalog** (your standard investigation query set). The buttons below it manage it
-without leaving the UI:
+The top of the **Run investigation** panel is where the work begins: name the case, name the subject,
+and point it at a catalog. Pick a **query catalog** (your standard query set; the dropdown shows its
+live query count). The buttons below it manage it without leaving the UI:
 
 - **Edit** the selected catalog, or **New** from a template. Each query has an `id`, `title`, `pq`
   (the PowerQuery), and a `merge` block telling the engine how to reassemble sliced results.
 - **Import** a catalog file, or **Export** the selected one. Saved catalogs persist in your output folder.
 - **Validate vs SDL** launches every query over a short recent window against your tenant and reports
   each as **valid**, **invalid** (a real syntax error), or **unknown** (transient). Run it before a
-  90-day investigation so a bad query is caught in seconds.
+  90-day investigation so a bad query is caught in seconds, not mid-run.
 - **Refresh from repo** pulls the latest catalogs from GitHub without rebuilding the image.
 
-The line under the dropdown shows which variables the catalog needs and which are still unset.
+The line under the dropdown shows which variables the catalog needs (amber = still unset), so you know
+what to fill in next.
 
 ---
 
@@ -89,38 +91,56 @@ not here.
 
 ## 5. Configure and start the run
 
-![Batch run form](images/06-run-batch.png)
+With a catalog chosen and variables set, the rest of the run form answers three questions: **who**,
+**when**, and **how carefully**.
 
-Choose **Single investigation** or **Batch (user list)** at the top of the panel.
+### Who: single or batch
 
-- **Single:** set **Case ID** and **Entity** (the subject, filling `{{entity}}` in every query).
-- **Batch:** paste or **Upload CSV** a single file whose columns are the same variables as single mode
-  (`email` required, plus `hostname, agent_uuid, ip, username, sf_user_id, session, app_name, domain,
-  login_key, file_or_title`), one row per user. Datatables and source overrides stay global. **CSV
-  template** downloads a ready-made header row.
+Toggle **Single investigation** for one subject (set **Case ID** and **Entity**, which fills
+`{{entity}}` in every query), or **Batch (user list)** to sweep many subjects at once.
 
-Then set the window and options:
+![Batch mode: one CSV, one row per user](images/06-run-batch.png)
 
-- **Lookback (days)** for a rolling window, or set **From** and **To** for a fixed window (for example
-  all of April). When a date range is set, Lookback is greyed out and ignored.
-- **Output folder** (blank uses the mounted `/data`), **Worker pool** and **Max attempts**. The pool
-  auto-sizes to tokens x 3 as you add tokens and shows the resulting aggregate rate; type a value to
-  override or clear it to auto-size again.
-- **Source field.** Which field the catalog's queries use to pin a data source. "As written" keeps each
-  query as-is; **Force serverHost** or **Force dataSource.name** rewrites every source-anchor predicate
-  to that field (some tenants populate one, some the other).
+In batch mode, paste or **Upload CSV** a single file whose columns are the same variables as single
+mode (`email` required, plus `hostname, agent_uuid, ip, username, sf_user_id, session, app_name,
+domain, login_key, file_or_title`), one row per user. Datatables and source overrides stay global;
+**CSV template** downloads a ready-made header row.
+
+### When: the time window
+
+![Window, date range, and output](images/02b-run-window.png)
+
+Use **Lookback (days)** for a rolling window, or set **From** and **To** for a fixed one (for example
+all of April); set a range and Lookback greys out. **Output folder** is blank for the mounted `/data`.
+**Worker pool** auto-sizes to tokens x 3 and shows the resulting aggregate rate; type a value to
+override, or clear it to auto-size again.
+
+### How carefully: execution options
+
+![Execution options](images/02c-run-options.png)
+
+These control resilience and cost:
+
+- **Adaptive sub-slice** splits a slow slice and retries the pieces; **Use cache** reuses immutable
+  past-day results so only new or changed days re-run.
+- **Stop query on permanent error** aborts a query that keeps failing, instead of re-failing it every
+  day (the circuit breaker; see Tips).
+- **Skip empty source-days** probes a source once per day and skips its queries when it has no data
+  that day, which is a big saving on quiet sources.
+- **Source field** (near the top of the form) forces every source anchor to `serverHost` or
+  `dataSource.name`, or leaves each query as written, to match how your tenant records sources.
 
   ![Source field selector](images/10-source-field.png)
 
-- **Priority**, **Adaptive sub-slice** (split a slow slice and retry the pieces), **Use cache** (reuse
-  immutable past-day results), **Stop query on permanent error** (the circuit breaker, see Tips),
-  **Skip empty source-days** (probe a source once per day and skip its queries if it has no data that
-  day), and **Dry run (offline mock)** to try the flow with no tenant.
-- **Select queries** runs only a subset of the catalog. Search by id or title and use **Select all** to
-  toggle the (filtered) list; the count updates live. The cost preview beside the button estimates the
-  job count (runnable queries x slices, with a skipped count) before you commit.
+- **Dry run (offline mock)** exercises the whole flow with no tenant.
 
-  ![Select queries](images/09-select-queries.png)
+### Scope and preview
+
+**Select queries** runs only a subset of the catalog. Search by id or title, use **Select all** to
+toggle the filtered list (with a live count), and the cost preview shows the job count (runnable
+queries x slices, with a skipped count) before you commit.
+
+![Select queries: search and select-all](images/09-select-queries.png)
 
 Click **Start investigation** (or **Start batch investigation**).
 
