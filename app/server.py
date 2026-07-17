@@ -56,7 +56,9 @@ CATALOG_REPO_REF = os.environ.get("S1IE_CATALOG_REPO_REF", "main")
 # Version shown in the UI. CI bakes S1IE_VERSION as "<semver>+<git-sha>" (or a tag);
 # show the clean part without the hash, plus a build date that updates every build.
 _RAW_VERSION = (os.environ.get("S1IE_VERSION") or ENGINE_VERSION).strip()
-VERSION_DISPLAY = _RAW_VERSION.split("+")[0]
+# Drop the +<git-sha> build suffix and any leading "v" (git tags are like v0.4.0,
+# and the UI prepends its own "v", so this avoids showing "vv0.4.0").
+VERSION_DISPLAY = _RAW_VERSION.split("+")[0].lstrip("vV")
 # Build date updates every build and carries no hash. Normalize an ISO timestamp
 # (e.g. 2026-07-17T09:00:00Z) down to the plain date for a clean header.
 BUILD_DATE = os.environ.get("S1IE_BUILD_DATE", "").strip()
