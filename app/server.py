@@ -202,6 +202,10 @@ def start_run(d: dict) -> dict:
     if not catalog_path:
         raise ValueError("catalog is required")
     catalog = load_catalog(catalog_path)
+    qids = d.get("queryIds")
+    if isinstance(qids, list) and qids:
+        keep = set(qids)
+        catalog.queries = [q for q in catalog.queries if q.id in keep]
 
     mock = bool(d.get("mock"))
     config = build_config(mock, int(d.get("mockTokens", 2)))
@@ -229,10 +233,23 @@ def start_run(d: dict) -> dict:
         priority=d.get("priority", "LOW"), variables=d.get("vars") or {},
         start_date=(d.get("startDate") or None), end_date=(d.get("endDate") or None))
 
+    started_at = datetime.now(timezone.utc).isoformat()
+    # Persist run metadata so the run can be resumed or reopened later (survives restart).
+    try:
+        (run_dir / "run_meta.json").write_text(json.dumps({
+            "run_id": run_id, "case": case, "entity": entity, "catalog": catalog_path,
+            "catalog_name": catalog.name, "lookback": d.get("lookback"),
+            "sliceDays": d.get("sliceDays"), "startDate": d.get("startDate"),
+            "endDate": d.get("endDate"), "vars": d.get("vars") or {},
+            "queryIds": qids if (isinstance(qids, list) and qids) else None,
+            "outputDir": d.get("outputDir") or "", "started_at": started_at}, indent=2))
+    except Exception:
+        pass
     reg = {"run_id": run_id, "case": case, "entity": entity, "run_dir": str(run_dir),
            "catalog": catalog.name, "status": "running", "activity": activity,
-           "engine": engine, "verification": None, "stats": None, "workbook": None,
-           "error": None, "started_at": datetime.now(timezone.utc).isoformat()}
+           "engine": engine, "ledger": ledger, "final_coverage": None,
+           "verification": None, "stats": None, "workbook": None,
+           "error": None, "started_at": started_at}
     with _RUNS_LOCK:
         _RUNS[run_id] = reg
 
@@ -252,6 +269,15 @@ def start_run(d: dict) -> dict:
                 reg["status"] = "cancelled"
             else:
                 reg["status"] = "complete" if v.passed else "incomplete"
+            reg["final_coverage"] = result.get("coverage")
+            try:
+                (run_dir / "verification.json").write_text(json.dumps(v.to_dict()))
+                (run_dir / "run_status.json").write_text(json.dumps({
+                    "status": reg["status"], "stats": result["stats"],
+                    "cache": result.get("cache"), "coverage": result.get("coverage"),
+                    "workbook": reg["workbook"], "entity": entity, "catalog": catalog.name}))
+            except Exception:
+                pass
             activity.log({"event": "verification", "passed": v.passed,
                           "passed_queries": v.passed_queries,
                           "total_queries": v.total_queries})
@@ -400,6 +426,118 @@ def enrich_users(d: dict) -> dict:
             "enriched": enriched, "matched": len(enriched), "requested": len(emails)}
 
 
+def preview_plan(d: dict) -> dict:
+    """Estimate the job count for a run without executing it."""
+    catalog = load_catalog(d.get("catalog"))
+    qids = d.get("queryIds")
+    if isinstance(qids, list) and qids:
+        keep = set(qids)
+        catalog.queries = [q for q in catalog.queries if q.id in keep]
+    from s1engine.slicing import slices_for_lookback, day_slices
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    sd, ed = d.get("startDate"), d.get("endDate")
+    slice_days = int(d.get("sliceDays", 1) or 1)
+    if sd and ed:
+        s = _dt.fromisoformat(sd).replace(tzinfo=_tz.utc)
+        e = _dt.fromisoformat(ed).replace(tzinfo=_tz.utc) + _td(days=1)
+        slices = day_slices(s, e, slice_days=slice_days)
+    else:
+        slices = slices_for_lookback(int(d.get("lookback", 90) or 90), slice_days=slice_days)
+    provided = {"entity"} | {k for k, v in (d.get("vars") or {}).items() if str(v).strip()}
+    runnable, skipped = 0, []
+    for q in catalog.enabled_queries():
+        missing = [v for v in q.required_vars() if v not in provided]
+        if missing:
+            skipped.append({"query": q.id, "missing": missing})
+        else:
+            runnable += 1
+    return {"queries_total": len(catalog.enabled_queries()), "queries_runnable": runnable,
+            "queries_skipped": len(skipped), "skipped": skipped[:50],
+            "slices": len(slices), "jobs": runnable * len(slices)}
+
+
+def test_connection(d: dict) -> dict:
+    """Confirm the token authenticates by launching a trivial probe query."""
+    import time as _t
+    from s1engine.lrq_client import LRQClient, RequestsTransport, QuerySyntaxError
+    from s1engine.rate_limiter import TokenBucket
+    from s1engine.slicing import iso_z
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    mock = bool(d.get("mock"))
+    config = build_config(mock)
+    transport = None
+    if mock:
+        from s1engine.testing import FakeTransport
+        transport = FakeTransport()
+    tp = transport or RequestsTransport(verify_tls=config.verify_tls, pool_maxsize=2)
+    client = LRQClient(config.console_url or "https://mock.local", (config.tokens or ["__mock__"])[0],
+                       TokenBucket(config.rps, config.burst), tp, poll_interval_s=config.poll_interval_s,
+                       query_timeout_s=20)
+    now = _dt.now(_tz.utc)
+    t0 = _t.monotonic()
+    try:
+        qid, tag = client.launch("dataSource.name=* | limit 1", iso_z(now - _td(hours=1)), iso_z(now),
+                                 tenant=config.tenant, account_ids=config.account_ids or None)
+        client.cancel(qid, tag)
+        return {"ok": True, "elapsed_s": round(_t.monotonic() - t0, 2), "console": config.console_url}
+    except QuerySyntaxError:
+        return {"ok": True, "note": "authenticated (probe query rejected, auth OK)", "console": config.console_url}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)[:200], "console": config.console_url}
+
+
+def list_history(limit: int = 50) -> list:
+    """Scan the output folder for past runs (survives restarts)."""
+    runs = []
+    if OUTPUT_BASE.is_dir():
+        for meta in OUTPUT_BASE.glob("*/*/run_meta.json"):
+            try:
+                m = json.loads(meta.read_text())
+            except Exception:
+                continue
+            rd = meta.parent
+            rid = m.get("run_id") or rd.name
+            status = "unknown"
+            live = _RUNS.get(rid)
+            if live:
+                status = live["status"]
+            elif (rd / "run_status.json").is_file():
+                try:
+                    status = json.loads((rd / "run_status.json").read_text()).get("status", "unknown")
+                except Exception:
+                    pass
+            runs.append({"run_id": rid, "case": m.get("case"), "entity": m.get("entity"),
+                         "catalog": m.get("catalog_name") or m.get("catalog"), "status": status,
+                         "started_at": m.get("started_at"), "run_dir": str(rd)})
+    runs.sort(key=lambda r: r.get("started_at") or "", reverse=True)
+    return runs[:limit]
+
+
+def resume_run(d: dict) -> dict:
+    """Re-run an existing run id from its stored metadata (retries pending/failed slices)."""
+    rid = d.get("runId")
+    rd = find_run_dir(rid) if rid else None
+    if not rd or not (rd / "run_meta.json").is_file():
+        raise ValueError("run metadata not found; cannot resume")
+    m = json.loads((rd / "run_meta.json").read_text())
+    sd = {"case": m["case"], "entity": m["entity"], "catalog": m["catalog"], "runId": rid,
+          "lookback": m.get("lookback"), "sliceDays": m.get("sliceDays"),
+          "startDate": m.get("startDate"), "endDate": m.get("endDate"),
+          "vars": m.get("vars") or {}, "queryIds": m.get("queryIds"),
+          "outputDir": m.get("outputDir") or "", "mock": bool(d.get("mock"))}
+    return start_run(sd)
+
+
+def read_result(run_dir: Path, query_id: str) -> dict:
+    p = run_dir / "results" / (_safe(query_id) + ".json")
+    if not p.is_file():
+        return {"error": "no result for query", "columns": [], "values": []}
+    data = json.loads(p.read_text())
+    return {"query_id": data.get("query_id"), "title": data.get("title"), "pq": data.get("pq"),
+            "columns": data.get("columns", []), "values": (data.get("values") or [])[:500],
+            "total_rows": len(data.get("values") or []), "warnings": data.get("warnings", [])}
+
+
 def save_catalog(d: dict) -> dict:
     filename = _safe(d.get("filename") or "").strip()
     content = d.get("content") or ""
@@ -459,22 +597,72 @@ class H(BaseHTTPRequestHandler):
                          "status": r["status"], "started_at": r.get("started_at")}
                         for r in _RUNS.values()]
             return self._send(200, {"runs": runs})
+        if p == "/api/runhistory":
+            return self._send(200, {"runs": list_history()})
+        if p == "/api/result":
+            run_dir = find_run_dir(qs.get("runId", [""])[0])
+            if not run_dir:
+                return self._send(404, {"error": "unknown run"})
+            return self._send(200, read_result(run_dir, qs.get("query", [""])[0]))
         if p == "/api/activity":
-            reg = _RUNS.get(qs.get("runId", [""])[0])
-            if not reg:
-                return self._send(404, {"error": "unknown run"})
+            rid = qs.get("runId", [""])[0]
             since = int(qs.get("since", ["0"])[0])
-            return self._send(200, {"events": reg["activity"].tail(since),
-                                    "last_seq": reg["activity"].last_seq(),
-                                    "status": reg["status"]})
-        if p == "/api/status":
-            reg = _RUNS.get(qs.get("runId", [""])[0])
-            if not reg:
+            reg = _RUNS.get(rid)
+            if reg:
+                return self._send(200, {"events": reg["activity"].tail(since),
+                                        "last_seq": reg["activity"].last_seq(),
+                                        "status": reg["status"]})
+            run_dir = find_run_dir(rid)  # disk fallback for reopened/past runs
+            if not run_dir:
                 return self._send(404, {"error": "unknown run"})
-            return self._send(200, {"status": reg["status"], "stats": reg.get("stats"),
-                                    "cache": reg.get("cache"), "error": reg.get("error"),
-                                    "verification": reg.get("verification"),
-                                    "workbook": reg.get("workbook"), "run_dir": reg["run_dir"]})
+            allev = ActivityLog.read_file(run_dir / "activity.jsonl")
+            events = [e for e in allev if e.get("seq", 0) > since]
+            status = "complete"
+            sp = run_dir / "run_status.json"
+            if sp.is_file():
+                try:
+                    status = json.loads(sp.read_text()).get("status", "complete")
+                except Exception:
+                    pass
+            return self._send(200, {"events": events,
+                                    "last_seq": (allev[-1]["seq"] if allev else since),
+                                    "status": status})
+        if p == "/api/status":
+            rid = qs.get("runId", [""])[0]
+            reg = _RUNS.get(rid)
+            if reg:
+                cov = None
+                if reg["status"] == "running":
+                    try:
+                        cov = reg["ledger"].coverage(rid)
+                    except Exception:
+                        cov = None
+                else:
+                    cov = reg.get("final_coverage")
+                return self._send(200, {"status": reg["status"], "stats": reg.get("stats"),
+                                        "cache": reg.get("cache"), "error": reg.get("error"),
+                                        "verification": reg.get("verification"), "coverage": cov,
+                                        "workbook": reg.get("workbook"), "run_dir": reg["run_dir"],
+                                        "started_at": reg.get("started_at")})
+            run_dir = find_run_dir(rid)  # disk fallback
+            if not run_dir:
+                return self._send(404, {"error": "unknown run"})
+            ver = None
+            if (run_dir / "verification.json").is_file():
+                try:
+                    ver = json.loads((run_dir / "verification.json").read_text())
+                except Exception:
+                    pass
+            st = {}
+            if (run_dir / "run_status.json").is_file():
+                try:
+                    st = json.loads((run_dir / "run_status.json").read_text())
+                except Exception:
+                    st = {}
+            return self._send(200, {"status": st.get("status", "unknown"), "stats": st.get("stats"),
+                                    "cache": st.get("cache"), "verification": ver,
+                                    "coverage": st.get("coverage"), "workbook": st.get("workbook"),
+                                    "run_dir": str(run_dir)})
         if p == "/api/activity_log":
             run_dir = find_run_dir(qs.get("runId", [""])[0])
             if not run_dir or not (run_dir / "activity.jsonl").is_file():
@@ -564,6 +752,12 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {"status": reg["status"], "note": "run not active"})
                 reg["engine"].request_cancel()
                 return self._send(200, {"status": "cancelling"})
+            if p == "/api/preview":
+                return self._send(200, preview_plan(d))
+            if p == "/api/test_connection":
+                return self._send(200, test_connection(d))
+            if p == "/api/resume":
+                return self._send(200, resume_run(d))
             if p == "/api/catalog_save":
                 return self._send(200, save_catalog(d))
             if p == "/api/refresh_catalogs":

@@ -289,6 +289,8 @@ class InvestigationEngine:
                 self.governor.on_throttle()
                 stats["throttles"] += 1
                 ledger.mark_pending(job.job_id, error="throttled")
+                self._emit({"event": "throttled", "query": job.query_id,
+                            "slice": job.slice_key, "gov_limit": self.governor.limit})
                 time.sleep(1.0)
                 enqueue(ledger.get_job(job.job_id))  # requeue this run
                 return
@@ -332,6 +334,8 @@ class InvestigationEngine:
         if attempts < params.max_attempts:
             stats["retries"] += 1
             ledger.mark_pending(job.job_id, error=err[:500])
+            self._emit({"event": "retry", "query": job.query_id, "slice": job.slice_key,
+                        "attempt": attempts, "error": err[:120]})
             time.sleep(min(2 ** attempts, 15))
             enqueue(ledger.get_job(job.job_id))
             return

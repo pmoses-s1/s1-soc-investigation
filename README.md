@@ -75,9 +75,23 @@ on success, self-tuning to whatever the backend tolerates.
 reused across runs, so re-running an investigation, or a second overlapping one, executes only the new
 or changed days.
 
-**Verification and activity logging.** Every event is written to `activity.jsonl` as it happens; after
-each run a verification report confirms every slice of every query completed and is presented in the
-UI. Download the raw activity log, or a zip of the results, from the UI or the API.
+**Live progress and verification.** A progress bar tracks completed slices against the planned total
+with a running throughput and time-to-finish estimate, and live tiles show done / cached / failed /
+throttled / retried counts as they change. Every event is written to `activity.jsonl` as it happens;
+after each run a verification report confirms every slice of every query completed and is presented in
+the UI, findings first (queries with hits sorted to the top). Click any query to preview its merged
+results inline. Download the raw activity log, or a zip of the results, from the UI or the API.
+
+**Single and batch investigations.** Run one entity, or a batch from a single CSV whose columns are the
+same variables as single mode (email plus hostname, agent_uuid, ip, username, sf_user_id, session), one
+row per user. Datatables stay global. The batch view rolls up per-user status and hit counts. Investigate
+a rolling lookback (e.g. last 90 days) or a fixed date window (e.g. all of April) via From/To dates.
+
+**Plan before you run.** A live cost preview estimates the job count (runnable queries x slices, with
+skipped-query count) as you change the catalog, query subset, lookback, dates, or variables. A **Test
+connection** button confirms the token authenticates before you start a long run. **Recent runs** lists
+past investigations (surviving restarts) and reopens any of them; an incomplete or cancelled run can be
+resumed from where it stopped.
 
 **Workbook export.** Each run produces a per-case `.xlsx`: a Summary sheet with the verification verdict
 and coverage, then one sheet per query with its merged results. Each query tab shows the exact
@@ -114,10 +128,15 @@ read the verification panel and downloads. In short:
 
 1. **Connect.** Console URL and one or more service-user tokens (one per line to round-robin). Tokens
    stay in the server process; the browser never receives them. Every field has a `?` with guidance.
-2. **Catalog.** Pick one, or Edit / New / Import / Export it, and Validate vs SDL.
-3. **Run.** Case id, entity, lookback, slice size, output folder, then Start.
-4. **Watch and verify.** The activity log streams live; the verification panel shows per-query
-   PASS / FAILED / INCOMPLETE and download buttons for the activity log and result zips.
+   Use **Test connection** to confirm the token authenticates before a long run.
+2. **Catalog.** Pick one, or Edit / New / Import / Export it, and Validate vs SDL. Optionally use
+   **Select queries** to run only a subset, and open **Variables** to set the template vars and datatables.
+3. **Run.** Choose Single or Batch, set case id and entity (or upload the batch CSV), a rolling lookback
+   or a From/To date window, output folder, then Start. The cost preview estimates the job count first.
+4. **Watch and verify.** The progress bar, ETA, and live tiles track execution while the activity log
+   streams; the verification panel shows per-query PASS / FAILED / INCOMPLETE / SKIPPED, findings first,
+   with hit counts. Click a query to preview its results. Download the activity log or result zips, or
+   Resume an incomplete run. **Recent runs** reopens any past investigation.
 
 The header shows the active build version (the running image's git sha), so you can confirm which
 build you are on. Once connected, the Connect panel collapses to a summary with an **Edit** button.
@@ -178,8 +197,16 @@ python -m s1engine.cli export --run-dir /data/CASE-1234/<run_id> --kind results
 
 ## Roadmap
 
-- **Orchestration.** A priority lane so an analyst's interactive queries preempt the
-  background batch, and job dedupe across concurrent investigations.
+- **Case report export.** Generate a formatted per-case report (findings, timeline, coverage, IOCs) as
+  a document from a completed run, not just the raw workbook and result zips.
+- **Timeline view.** A cross-query, cross-source chronological timeline of the entity's activity built
+  from the merged results, for faster storyline reconstruction.
+- **Scheduled sweeps.** Recurring runs of a catalog against a saved entity or user list, so a standard
+  hunt executes on a cadence and flags new findings between runs.
+- **Saved scenarios.** Named bundles of catalog + query subset + variables + lookback that an analyst
+  can reuse and share, instead of re-entering the run configuration each time.
+- **Orchestration.** A priority lane so an analyst's interactive queries preempt the background batch,
+  and job dedupe across concurrent investigations.
 
 ## Layout
 

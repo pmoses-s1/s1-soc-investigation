@@ -139,6 +139,11 @@
         <div><label>Account IDs <span class="help" data-tip="Optional, comma-separated. Scopes the query to these accounts (sets tenant=false). Use this if a tenant-wide query returns zero rows on a multi-account tenant.">?</span></label><input id="accts" placeholder="optional"></div>
       </div>
       <button id="btnConnect">Connect</button>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <button class="ghost" id="btnTestConn" style="flex:1;margin-top:0">Test connection</button>
+        <span class="help" data-tip="Verifies the saved token actually authenticates by launching a tiny probe query and cancelling it. Does not run an investigation. Use it after Connect to confirm credentials before a long run.">?</span>
+      </div>
+      <div class="hint" id="connMsg"></div>
       </div>
     </div>
 
@@ -207,8 +212,19 @@
         </div>
       </div>
       <div class="chk"><input id="mock" type="checkbox"><label>Dry run (offline mock) <span class="help" data-tip="Run offline against a built-in fake backend to try the whole flow without a tenant or credentials.">?</span></label></div>
+      <div class="btnrow" style="margin-top:10px;align-items:center">
+        <button class="ghost sm" id="btnQueries">Select queries</button>
+        <span class="help" data-tip="Run only a subset of this catalog's queries instead of all of them. Defaults to all. Handy for a targeted re-run after you fill in more variables, or to skip expensive queries.">?</span>
+        <span id="costHint" class="hint" style="align-self:center"></span>
+      </div>
       <button id="btnRun">Start investigation</button>
+      <div class="hint" id="runMsg" style="text-align:center"></div>
       <button class="ghost" id="btnCancel" style="display:none;width:100%;margin-top:8px">Cancel run (resumable)</button>
+    </div>
+
+    <div class="card">
+      <h2>Recent runs <button class="ghost sm" id="btnHistoryRefresh" style="float:right;margin-top:-2px">Refresh</button></h2>
+      <div id="historyList" class="hint">No runs yet.</div>
     </div>
   </div>
 
@@ -219,6 +235,14 @@
     </div>
     <div class="card">
       <h2>Verification <span id="vLabel" class="muted" style="font-weight:400;font-size:12px"></span></h2>
+      <div id="progressWrap" style="display:none;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--hint)">
+          <span id="progText">0 / 0 slices</span><span id="etaText"></span></div>
+        <div style="height:12px;border-radius:8px;background:var(--surface);box-shadow:var(--nm-in-sm);overflow:hidden;margin-top:5px">
+          <div id="progBar" style="height:100%;width:0%;background:linear-gradient(90deg,var(--pur),var(--mag));transition:width .3s"></div>
+        </div>
+        <div id="liveTiles" style="margin-top:8px"></div>
+      </div>
       <div id="verdict"><span class="muted">Run an investigation to see per-query verification.</span></div>
       <div id="downloads" class="btnrow"></div>
       <div id="stats" style="margin-top:12px"></div>
@@ -279,6 +303,28 @@
   </div>
 </div>
 
+<!-- Results preview modal -->
+<div class="modal" id="resModal">
+  <div class="box" style="width:min(1100px,100%)">
+    <span class="x" id="resClose">&times;</span>
+    <h3 id="resTitle">Query result</h3>
+    <div class="hint" id="resMeta"></div>
+    <div id="resTable" style="max-height:60vh;overflow:auto;margin-top:10px"></div>
+  </div>
+</div>
+
+<!-- Query selection modal -->
+<div class="modal" id="qModal">
+  <div class="box">
+    <span class="x" id="qClose">&times;</span>
+    <h3>Select queries</h3>
+    <div class="hint">Choose which queries from this catalog to run. Unchecked queries are excluded. Defaults to all.</div>
+    <div class="btnrow"><button class="ghost sm" id="qAll">Select all</button><button class="ghost sm" id="qNone">Select none</button></div>
+    <div id="qList" style="max-height:50vh;overflow:auto;margin-top:8px"></div>
+    <button id="qSave">Use selected</button>
+  </div>
+</div>
+
 <script>
 const TOKEN = new URLSearchParams(location.search).get("token") || "";
 function hdrs(){const h={"Content-Type":"application/json"}; if(TOKEN)h["X-Auth-Token"]=TOKEN; return h;}
@@ -289,6 +335,7 @@ const $=id=>document.getElementById(id);
 
 let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
 let DTS=[], MODE="single", SUBJECTS=[], BATCH=[], BATCHPOLL=null;
+let RUN_START=0, COUNTS={cached:0,throttled:0,retried:0,subdivided:0,failed:0,done:0}, SELECTED_QIDS=null, CONNECTED=false;
 let VARS={};
 try{ VARS=JSON.parse(localStorage.getItem("s1ie_vars")||"{}"); }catch(e){ VARS={}; }
 const KNOWN_VARS=["hostname","agent_uuid","ip","username","sf_user_id","session"];
@@ -323,7 +370,7 @@ $("btnVarsSave").onclick=()=>{
     const i=line.indexOf("="); if(i>0){ const k=line.slice(0,i).trim(); const val=line.slice(i+1).trim(); if(k)v[k]=val; }
   });
   VARS=v; try{ localStorage.setItem("s1ie_vars",JSON.stringify(VARS)); }catch(e){}
-  renderVarsSummary(); updateCatVars(); $("varsModal").classList.remove("open");
+  renderVarsSummary(); updateCatVars(); updatePreview(); $("varsModal").classList.remove("open");
 };
 $("btnRefreshCatalogs").onclick=async()=>{
   const b=$("btnRefreshCatalogs"); b.disabled=true; b.textContent="Refreshing…";
@@ -346,7 +393,7 @@ async function loadConfig(){
     sel.appendChild(o);
   });
   if(prev)sel.value=prev;
-  sel.onchange=updateCatVars;
+  sel.onchange=onCatalogChange;
   setConn(c.creds_ok,c.console_url,c.num_tokens);
   if(c.console_url&&!$("console").value)$("console").value=c.console_url;
   DTS=c.datatables||[]; renderDtFields();
@@ -365,6 +412,7 @@ function renderDtFields(){
   }
 }
 function setConn(ok,url,n){
+  CONNECTED=!!ok;
   $("cdot").className="dot"+(ok?" on":"");
   $("cstat").textContent=ok?`connected · ${n} token${n==1?"":"s"}`:"not connected";
   // Collapse the Connect panel once connected; reopen via Edit.
@@ -400,33 +448,65 @@ function buildBaseBody(){
     vars:VARS};
   const f=$("fromDate").value, t=$("toDate").value;
   if(f&&t){ b.startDate=f; b.endDate=t; }
+  if(SELECTED_QIDS && SELECTED_QIDS.length) b.queryIds=SELECTED_QIDS;
   return b;
 }
+function setRunMsg(m,err){ const el=$("runMsg"); el.textContent=m||""; el.style.color=err?"var(--red)":"var(--hint)"; }
 function viewRun(run_id, run_dir){
-  CURRENT=run_id; LASTSEQ=0;
+  CURRENT=run_id; LASTSEQ=0; RUN_START=Date.now();
+  COUNTS={cached:0,throttled:0,retried:0,subdivided:0,failed:0,done:0};
   $("log").innerHTML=""; $("vtable").innerHTML=""; $("stats").innerHTML=""; $("downloads").innerHTML="";
   $("runlabel").textContent="· "+run_id; $("vLabel").textContent="· "+run_id;
+  $("progBar").style.width="0%"; $("progText").textContent="starting…"; $("etaText").textContent=""; $("liveTiles").innerHTML="";
+  $("progressWrap").style.display="block";
   $("verdict").innerHTML='<span class="badge run">RUNNING</span> <span class="muted">'+(run_dir||"")+'</span>';
   const cb=$("btnCancel"); cb.style.display="block"; cb.disabled=false; cb.textContent="Cancel run (resumable)";
   if(POLL)clearInterval(POLL); POLL=setInterval(poll,1000); poll();
 }
+function fmtDur(s){ s=Math.round(s); if(s<60)return s+"s"; const m=Math.floor(s/60); if(m<60)return `${m}m ${s%60}s`; const h=Math.floor(m/60); return `${h}h ${m%60}m`; }
+function renderProgress(s){
+  const cov=s&&s.coverage;
+  if(!cov||!cov.total_jobs){ return; }
+  $("progressWrap").style.display="block";
+  const t=cov.totals_by_state||{};
+  const done=(t.done||0)+(t.failed||0)+(t.permanent||0)+(t.subdivided||0);
+  const total=cov.total_jobs||0, pct=total?Math.round(done/total*100):0;
+  $("progBar").style.width=pct+"%";
+  $("progText").textContent=`${done} / ${total} slices (${pct}%)`;
+  const el=(Date.now()-RUN_START)/1000, rate=el>0?done/el:0, remaining=total-done;
+  if(s.status==="running" && rate>0 && remaining>0) $("etaText").textContent=`~${fmtDur(remaining/rate)} left · ${rate.toFixed(1)}/s`;
+  else if(s.status!=="running") $("etaText").textContent=`finished in ${fmtDur(el)}`;
+  const tiles=[["done",t.done||0],["cached",COUNTS.cached],["failed",t.failed||0],
+    ["pending",(t.pending||0)+(t.in_flight||0)],["throttled",COUNTS.throttled],["retried",COUNTS.retried]];
+  $("liveTiles").innerHTML=tiles.map(([k,v])=>`<span class="stat">${k} <b>${v}</b></span>`).join("");
+}
+function notifyDone(s){
+  try{ if(window.Notification && Notification.permission==="granted")
+    new Notification("Investigation "+(s.status||"done"), {body:(CURRENT||"")+" — "+(s.verification?`${s.verification.passed_queries}/${s.verification.total_queries} passed`:s.status)});
+  }catch(e){}
+  try{ const a=new (window.AudioContext||window.webkitAudioContext)(); const o=a.createOscillator(),g=a.createGain();
+    o.connect(g);g.connect(a.destination);o.frequency.value=660;g.gain.value=0.05;o.start();setTimeout(()=>{o.stop();a.close();},180);
+  }catch(e){}
+}
 $("btnRun").onclick=async()=>{
+  setRunMsg("");
+  if(!$("mock").checked && !CONNECTED){ setRunMsg("Not connected. Connect a tenant, or tick Dry run.",true); return; }
   const body=buildBaseBody();
   if(MODE==="single"){
     body.entity=$("entity").value.trim();
-    if(!body.entity){alert("Entity is required");return;}
+    if(!body.entity){ setRunMsg("Entity is required.",true); $("entity").focus(); return; }
     const r=await apiPost("/api/run",body);
-    if(r.error){alert(r.error);return;}
-    $("btnRun").disabled=true; viewRun(r.run_id,r.run_dir);
+    if(r.error){setRunMsg(r.error,true);return;}
+    $("btnRun").disabled=true; viewRun(r.run_id,r.run_dir); loadHistory();
   } else {
     parseSubjects();
-    if(!SUBJECTS.length){alert("Add users (paste or upload a CSV list) for batch mode");return;}
+    if(!SUBJECTS.length){ setRunMsg("Add users (paste or upload a CSV) for batch mode.",true); return; }
     body.subjects=SUBJECTS;
     $("btnRun").disabled=true; $("btnRun").textContent="Starting batch…";
     const r=await apiPost("/api/run",body);
     $("btnRun").disabled=false; $("btnRun").textContent="Start batch investigation";
-    if(r.error){alert(r.error);return;}
-    BATCH=r.batch||[]; renderBatch(); pollBatch();
+    if(r.error){setRunMsg(r.error,true);return;}
+    BATCH=r.batch||[]; renderBatch(); pollBatch(); loadHistory();
     if(BATCH[0]) viewRun(BATCH[0].run_id,BATCH[0].run_dir);
   }
 };
@@ -439,9 +519,13 @@ $("btnCancel").onclick=async()=>{
 
 function addLine(ev){
   const box=$("log");
+  if(ev.event==="slice_cached")COUNTS.cached++;
+  else if(ev.event==="throttled")COUNTS.throttled++;
+  else if(ev.event==="retry")COUNTS.retried++;
+  else if(ev.event==="subdivided")COUNTS.subdivided++;
   const cls={slice_done:"ok",slice_cached:"cache",slice_failed:"fail",permanent:"perm",subdivided:"warn",
     verification:"info",resume:"info",planned:"info",finalized:"info",workbook:"info",warning:"warn",
-    cancelling:"warn",cancelled:"warn",error:"fail"}[ev.event]||"";
+    cancelling:"warn",cancelled:"warn",throttled:"warn",retry:"warn",error:"fail"}[ev.event]||"";
   const t=new Date((ev.ts||0)*1000).toLocaleTimeString();
   const div=document.createElement("div"); div.className="le "+cls;
   div.innerHTML=`<span class="t">${t}</span> <span class="m">${fmt(ev)}</span>`;
@@ -455,6 +539,9 @@ function fmt(e){switch(e.event){
   case"slice_failed":return `FAIL ${e.query} [${e.slice}] ${e.error||""}`;
   case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
   case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
+  case"throttled":return `throttled ${e.query} [${e.slice}] backing off (gov=${e.gov_limit})`;
+  case"retry":return `retry ${e.query} [${e.slice}] attempt ${e.attempt}`;
+  case"query_skipped":return `skipped ${e.query} (needs ${(e.missing||[]).join(", ")})`;
   case"workbook":return `workbook → ${e.path}`;
   case"cancelling":return "cancel requested — stopping after in-flight slices finish";
   case"cancelled":return `cancelled (done ${e.done}); re-run the same case to resume`;
@@ -467,9 +554,12 @@ async function poll(){
   if(!CURRENT)return;
   const a=await apiGet(`/api/activity?runId=${encodeURIComponent(CURRENT)}&since=${LASTSEQ}`);
   (a.events||[]).forEach(ev=>{LASTSEQ=Math.max(LASTSEQ,ev.seq);addLine(ev);});
-  if(a.status&&a.status!=="running"){
+  const s=await apiGet(`/api/status?runId=${encodeURIComponent(CURRENT)}`);
+  renderProgress(s);
+  const done=(a.status&&a.status!=="running")||(s.status&&s.status!=="running"&&s.status!=="unknown");
+  if(done){
     clearInterval(POLL);POLL=null;$("btnRun").disabled=false;$("btnCancel").style.display="none";
-    renderVerification(await apiGet(`/api/status?runId=${encodeURIComponent(CURRENT)}`));
+    renderVerification(s); notifyDone(s);
   }
 }
 
@@ -481,28 +571,58 @@ function renderVerification(s){
     ? '<span class="badge warn">CANCELLED — resumable (re-run the same case to continue)</span>'
     : (v.passed?'<span class="badge ok">PASS — all queries completed</span>'
               :'<span class="badge bad">ATTENTION — incomplete</span>');
-  $("verdict").innerHTML=verdict+` <span class="muted">${v.passed_queries}/${v.total_queries} queries passed</span>`;
+  const findings=v.queries.filter(q=>q.result_rows>0);
+  const totalRows=findings.reduce((a,q)=>a+q.result_rows,0);
+  $("verdict").innerHTML=verdict+` <span class="muted">${v.passed_queries}/${v.total_queries} passed`
+    +(v.skipped_queries?`, ${v.skipped_queries} skipped`:"")+`</span>`
+    +(findings.length?` <span class="badge warn" style="margin-left:6px">${findings.length} with hits (${totalRows} rows)</span>`:"");
   const rid=encodeURIComponent(CURRENT);
-  $("downloads").innerHTML=
-    `<a href="/api/activity_log?runId=${rid}${tq()}"><button class="ghost sm">↓ Activity log (.jsonl)</button></a>`+
+  let dl=`<a href="/api/activity_log?runId=${rid}${tq()}"><button class="ghost sm">↓ Activity log</button></a>`+
     `<a href="/api/export?runId=${rid}&kind=results${tq()}"><button class="ghost sm">↓ Results (.zip)</button></a>`+
     `<a href="/api/export?runId=${rid}&kind=all${tq()}"><button class="ghost sm">↓ Everything (.zip)</button></a>`;
+  if(s.status==="incomplete"||s.status==="cancelled") dl+=`<button class="ghost sm" id="btnResume">Resume run</button>`;
+  $("downloads").innerHTML=dl;
+  if($("btnResume")) $("btnResume").onclick=async()=>{ const r=await apiPost("/api/resume",{runId:CURRENT}); if(r.error){alert(r.error);return;} viewRun(r.run_id,r.run_dir); };
   const st=s.stats||{};
   $("stats").innerHTML=Object.entries({done:st.done,cached:st.cached,failed:st.failed,permanent:st.permanent,
     retries:st.retries,throttles:st.throttles,subdivided:st.subdivided}).filter(([k,x])=>x!==undefined)
     .map(([k,x])=>`<span class="stat">${k} <b>${x}</b></span>`).join("");
-  let h='<table><thead><tr><th>Query</th><th>Status</th><th class="n">Done</th><th class="n">Fail</th>'+
-    '<th class="n">Perm</th><th class="n">Pend</th><th class="n">Rows</th></tr></thead><tbody>';
-  v.queries.forEach(q=>{h+=`<tr><td>${q.query_id}<div class="kv">${q.title||""}</div></td>`+
-    `<td><span class="pill ${q.status}">${q.status}</span></td><td class="n">${q.done}</td>`+
-    `<td class="n">${q.failed}</td><td class="n">${q.permanent}</td><td class="n">${q.pending+q.in_flight}</td>`+
-    `<td class="n">${q.result_rows}</td></tr>`;
-    if(q.warnings&&q.warnings.length)h+=`<tr><td colspan="7" class="kv">⚠ ${q.warnings.join("; ")}</td></tr>`;});
-  h+='</tbody></table>';
-  if(s.workbook)h+=`<div class="kv" style="margin-top:8px">Workbook: ${s.workbook}</div>`;
-  h+=`<div class="kv">All outputs written to: ${s.run_dir}</div>`;
+  // findings first: rows desc, then failing, then rest
+  const rank=q=> (q.status==="failed"?3:0) + (q.result_rows>0?2:0);
+  const rows=[...v.queries].sort((x,y)=> (y.result_rows-x.result_rows) || (rank(y)-rank(x)));
+  let h='<table><thead><tr><th>Query</th><th>Status</th><th class="n">Rows</th><th class="n">Done</th>'+
+    '<th class="n">Fail</th><th class="n">Skip</th></tr></thead><tbody>';
+  rows.forEach(q=>{ const hit=q.result_rows>0;
+    h+=`<tr data-q="${q.query_id}" style="cursor:pointer">`+
+      `<td>${hit?'<b>':''}${q.query_id}${hit?'</b>':''}<div class="kv">${q.title||""}</div></td>`+
+      `<td><span class="pill ${q.status}">${q.status}</span></td>`+
+      `<td class="n">${hit?'<b>'+q.result_rows+'</b>':q.result_rows}</td>`+
+      `<td class="n">${q.done}</td><td class="n">${q.failed+q.permanent}</td>`+
+      `<td class="n">${q.pending+q.in_flight}</td></tr>`;
+    if(q.warnings&&q.warnings.length)h+=`<tr><td colspan="6" class="kv">⚠ ${q.warnings.join("; ")}</td></tr>`;});
+  h+='</tbody></table><div class="kv" style="margin-top:6px">Click a query to preview its results.</div>';
+  if(s.workbook)h+=`<div class="kv">Workbook: ${s.workbook}</div>`;
+  h+=`<div class="kv">Outputs: ${s.run_dir}</div>`;
   $("vtable").innerHTML=h;
+  [...$("vtable").querySelectorAll("tr[data-q]")].forEach(tr=>tr.onclick=()=>openResult(tr.dataset.q));
 }
+function openResult(qid){
+  $("resTitle").textContent=qid; $("resMeta").textContent="Loading…"; $("resTable").innerHTML="";
+  $("resModal").classList.add("open");
+  apiGet(`/api/result?runId=${encodeURIComponent(CURRENT)}&query=${encodeURIComponent(qid)}`).then(r=>{
+    if(r.error){$("resMeta").textContent=r.error;return;}
+    $("resTitle").textContent=r.title||qid;
+    $("resMeta").innerHTML=`${r.total_rows} rows`+(r.total_rows>500?" (showing first 500)":"")
+      +(r.warnings&&r.warnings.length?` · ⚠ ${r.warnings.join("; ")}`:"")
+      +(r.pq?`<pre style="white-space:pre-wrap;background:#e0deef;border-radius:8px;padding:8px;margin-top:8px;font-size:11px">${r.pq.replace(/</g,"&lt;")}</pre>`:"");
+    const cols=r.columns||[];
+    if(!cols.length){$("resTable").innerHTML='<div class="kv">No columns / no rows.</div>';return;}
+    $("resTable").innerHTML='<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join("")+'</tr></thead><tbody>'+
+      (r.values||[]).map(row=>'<tr>'+cols.map((_,i)=>`<td class="kv">${row[i]==null?"":String(row[i]).slice(0,200)}</td>`).join("")+'</tr>').join("")+'</tbody></table>';
+  });
+}
+$("resClose").onclick=()=>$("resModal").classList.remove("open");
+$("resModal").onclick=e=>{if(e.target.id==="resModal")$("resModal").classList.remove("open");};
 
 /* ---------- catalog editor ---------- */
 const QUERY_TEMPLATE=
@@ -630,10 +750,13 @@ function renderBatch(){
       : st==="error"?'<span class="pill failed">error</span>'
       : st==="incomplete"?'<span class="pill incomplete">incomplete</span>'
       : '<span class="pill incomplete">running</span>';
-  $("batchList").innerHTML='<table><thead><tr><th>User</th><th>Status</th><th class="n">Passed</th></tr></thead><tbody>'+
+  $("batchList").innerHTML='<table><thead><tr><th>User</th><th>Status</th><th class="n">Passed</th><th class="n">Hits</th></tr></thead><tbody>'+
     BATCH.map((b,i)=>{ const v=b.verification;
       const vt=v?`${v.passed_queries}/${v.total_queries}`+(v.skipped_queries?` (+${v.skipped_queries})`:""):"";
-      return `<tr style="cursor:pointer" data-i="${i}"><td>${b.entity}</td><td>${pill(b.status||"running")}</td><td class="n">${vt}</td></tr>`;
+      let hits="";
+      if(v&&v.queries){ const f=v.queries.filter(q=>q.result_rows>0); const rows=f.reduce((a,q)=>a+q.result_rows,0);
+        hits=f.length?`<b style="color:var(--amb)">${f.length}</b> <span class="kv">(${rows})</span>`:'<span class="kv">0</span>'; }
+      return `<tr style="cursor:pointer" data-i="${i}"><td>${b.entity}</td><td>${pill(b.status||"running")}</td><td class="n">${vt}</td><td class="n">${hits}</td></tr>`;
     }).join('')+'</tbody></table>';
   [...$("batchList").querySelectorAll("tr[data-i]")].forEach(tr=>tr.onclick=()=>{const b=BATCH[+tr.dataset.i];viewRun(b.run_id,b.run_dir);});
 }
@@ -659,8 +782,79 @@ function updateRangeHint(){
 }
 $("fromDate").onchange=updateRangeHint; $("toDate").onchange=updateRangeHint;
 
+/* ---------- test connection ---------- */
+$("btnTestConn").onclick=async()=>{
+  const b=$("btnTestConn"); b.disabled=true; $("connMsg").style.color="var(--hint)"; $("connMsg").textContent="Testing…";
+  const r=await apiPost("/api/test_connection",{mock:$("mock").checked}); b.disabled=false;
+  if(r.ok){ $("connMsg").style.color="var(--grn)"; $("connMsg").textContent="Connected"+(r.elapsed_s!=null?` (${r.elapsed_s}s)`:"")+(r.note?" · "+r.note:""); }
+  else { $("connMsg").style.color="var(--red)"; $("connMsg").textContent="Failed: "+(r.error||"unknown"); }
+};
+
+/* ---------- cost preview ---------- */
+let PREVIEW_T=null;
+function updatePreview(){
+  clearTimeout(PREVIEW_T);
+  PREVIEW_T=setTimeout(async()=>{
+    const cat=$("catalog").value; if(!cat){ $("costHint").textContent=""; return; }
+    const body={catalog:cat,lookback:parseInt($("lookback").value)||90,sliceDays:parseInt($("sliceDays").value)||1,vars:VARS};
+    const f=$("fromDate").value,t=$("toDate").value; if(f&&t){body.startDate=f;body.endDate=t;}
+    if(SELECTED_QIDS&&SELECTED_QIDS.length)body.queryIds=SELECTED_QIDS;
+    const r=await apiPost("/api/preview",body);
+    if(r.error){ $("costHint").textContent=""; return; }
+    $("costHint").innerHTML=`~<b>${r.jobs}</b> jobs (${r.queries_runnable} queries × ${r.slices} slices)`+(r.queries_skipped?` · ${r.queries_skipped} skipped`:"");
+  },300);
+}
+function onCatalogChange(){ SELECTED_QIDS=null; updateCatVars(); updatePreview(); saveForm(); }
+["lookback","sliceDays","fromDate","toDate"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("change",updatePreview); });
+
+/* ---------- query selection ---------- */
+$("btnQueries").onclick=async()=>{
+  const c=curCat(); if(!c){setRunMsg("Pick a catalog first.",true);return;}
+  const d=await apiGet("/api/catalog?path="+encodeURIComponent(c.path));
+  const sel=SELECTED_QIDS?new Set(SELECTED_QIDS):null;
+  $("qList").innerHTML=(d.queries||[]).map(q=>`<label class="chk" style="margin-top:6px"><input type="checkbox" class="qc" value="${q.id}" ${(!sel||sel.has(q.id))?"checked":""}> <span>${q.id} <span class="kv">${q.title||""}</span></span></label>`).join("");
+  $("qModal").classList.add("open");
+};
+$("qClose").onclick=()=>$("qModal").classList.remove("open");
+$("qModal").onclick=e=>{if(e.target.id==="qModal")$("qModal").classList.remove("open");};
+$("qAll").onclick=()=>[...document.querySelectorAll(".qc")].forEach(c=>c.checked=true);
+$("qNone").onclick=()=>[...document.querySelectorAll(".qc")].forEach(c=>c.checked=false);
+$("qSave").onclick=()=>{
+  const all=[...document.querySelectorAll(".qc")], checked=all.filter(c=>c.checked).map(c=>c.value);
+  SELECTED_QIDS=(checked.length===all.length)?null:checked;
+  $("qModal").classList.remove("open"); updatePreview();
+  if(SELECTED_QIDS) $("catVars").textContent=`${SELECTED_QIDS.length} of ${all.length} queries selected`; else updateCatVars();
+};
+
+/* ---------- history ---------- */
+async function loadHistory(){
+  const r=await apiGet("/api/runhistory"); const runs=r.runs||[];
+  if(!runs.length){ $("historyList").textContent="No runs yet."; return; }
+  $("historyList").innerHTML=runs.slice(0,15).map(x=>{
+    const st=x.status||"?";
+    const pill= st==="complete"?'<span class="pill pass">complete</span>':st==="running"?'<span class="pill incomplete">running</span>':st==="error"?'<span class="pill failed">error</span>':`<span class="pill incomplete">${st}</span>`;
+    return `<div style="cursor:pointer;padding:6px 0;border-bottom:1px solid var(--line)" data-run="${x.run_id}" data-dir="${x.run_dir}"><b>${x.case||""}</b> ${x.entity||""} ${pill}<div class="kv">${x.catalog||""} · ${(x.started_at||"").slice(0,16).replace("T"," ")}</div></div>`;
+  }).join("");
+  [...$("historyList").querySelectorAll("[data-run]")].forEach(el=>el.onclick=()=>viewRun(el.dataset.run, el.dataset.dir));
+}
+$("btnHistoryRefresh").onclick=loadHistory;
+
+/* ---------- persist run form ---------- */
+const FORM_FIELDS=["case","catalog","lookback","sliceDays","outputDir","pool","maxAttempts","priority","fromDate","toDate"];
+function saveForm(){ const o={}; FORM_FIELDS.forEach(k=>{if($(k))o[k]=$(k).value;}); o.subdivide=$("subdivide").checked; o.useCache=$("useCache").checked; try{localStorage.setItem("s1ie_form",JSON.stringify(o));}catch(e){} }
+function restoreForm(){ let o={}; try{o=JSON.parse(localStorage.getItem("s1ie_form")||"{}");}catch(e){}
+  FORM_FIELDS.forEach(k=>{ if(o[k]==null||o[k]===""||!$(k))return;
+    if(k==="catalog"){ if(CATALOGS.some(c=>c.path===o[k])) $(k).value=o[k]; }  // skip stale catalog paths
+    else $(k).value=o[k]; });
+  if(o.subdivide!=null)$("subdivide").checked=o.subdivide; if(o.useCache!=null)$("useCache").checked=o.useCache; }
+FORM_FIELDS.forEach(k=>{ const el=$(k); if(el) el.addEventListener("change",saveForm); });
+$("subdivide").addEventListener("change",saveForm); $("useCache").addEventListener("change",saveForm);
+
 setMode("single");
-loadConfig();
+loadConfig().then(()=>{
+  restoreForm(); updateCatVars(); updatePreview(); loadHistory();
+  if(window.Notification && Notification.permission==="default"){ try{Notification.requestPermission();}catch(e){} }
+});
 </script>
 </body>
 </html>
