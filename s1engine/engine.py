@@ -250,7 +250,7 @@ class InvestigationEngine:
         self._broken_lock = threading.Lock()
         # Source-existence cache for the day pre-check: (source, slice_key) -> bool,
         # with per-key in-flight events so each (source, day) is probed only once.
-        self._src_exist: Dict[tuple, tuple] = {}
+        self._src_exist: Dict[tuple, bool] = {}
         self._src_inflight: Dict[tuple, threading.Event] = {}
         self._warned_mismatch: set = set()
         self._src_lock = threading.Lock()
@@ -353,17 +353,18 @@ class InvestigationEngine:
             src = _query_source(job.pq)
             if src is not None:
                 field, value = src
-                has_sh, has_dsn = self._source_probe(value, job, params)
-                used = has_sh if field == "serverHost" else has_dsn
+                other_field = "dataSource.name" if field == "serverHost" else "serverHost"
+                skip = False
                 skip_other = None
-                if not has_sh and not has_dsn:
-                    skip = True                    # source truly has no data that day
-                elif not used:
-                    skip = True                    # data is under the OTHER field
-                    skip_other = "dataSource.name" if field == "serverHost" else "serverHost"
-                    self._warn_field_mismatch(value, field, skip_other)
-                else:
-                    skip = False
+                if not self._field_has_data(field, value, job, params):
+                    # Used field is empty; probe the other field to tell "empty day"
+                    # from "data is under the other field" (query anchored wrong).
+                    if self._field_has_data(other_field, value, job, params):
+                        skip = True
+                        skip_other = other_field
+                        self._warn_field_mismatch(value, field, other_field)
+                    else:
+                        skip = True
                 if skip:
                     ledger.mark_in_flight(job.job_id)
                     path = self._persist_slice(job, [], [], 0, 0, 0.0)
@@ -440,11 +441,15 @@ class InvestigationEngine:
                               "client": client.name,
                               "gov_limit": self.governor.limit})
 
-    def _source_probe(self, value: str, job: Job, params: RunParams):
-        """Probe whether `value` has data in this day-slice under EITHER anchor field.
-        Returns (has_serverHost, has_dataSource_name). Probed once per (value, slice)
-        and cached; concurrent jobs wait on the first probe. Fails open (True, True)."""
-        key = (value, job.slice_key, job.scope)
+    def _field_has_data(self, field: str, value: str, job: Job, params: RunParams) -> bool:
+        """Whether `field='value'` has any data in this day-slice. Probed once per
+        (field, value, slice) and cached; concurrent jobs wait on the first probe.
+        Fails open (True) on error so a probe never drops a real query.
+
+        Probing is lazy: callers check the query's own field first and only probe the
+        other field if the first is empty, so the common (data present) case costs a
+        single probe shared across every query for that source that day."""
+        key = (field, value, job.slice_key, job.scope)
         with self._src_lock:
             if key in self._src_exist:
                 return self._src_exist[key]
@@ -455,24 +460,22 @@ class InvestigationEngine:
                 self._src_inflight[key] = ev
         if not owner:
             ev.wait(timeout=120)
-            return self._src_exist.get(key, (True, True))
-
-        def probe(field: str) -> bool:
-            try:
-                with self.governor.slot():
-                    res = self._next_client().run_pq(
-                        f"{field}='{value}' | limit 1", job.slice_start, job.slice_end,
-                        tenant=self.config.tenant,
-                        account_ids=self.config.account_ids or None,
-                        priority=params.priority)
-                return (res.row_count > 0) or (res.match_count > 0)
-            except Exception:  # noqa: BLE001 - fail open; never drop real queries
-                return True
-        result = (probe("serverHost"), probe("dataSource.name"))
+            return self._src_exist.get(key, True)
+        has = True
+        try:
+            with self.governor.slot():
+                res = self._next_client().run_pq(
+                    f"{field}='{value}' | limit 1", job.slice_start, job.slice_end,
+                    tenant=self.config.tenant,
+                    account_ids=self.config.account_ids or None,
+                    priority=params.priority)
+            has = (res.row_count > 0) or (res.match_count > 0)
+        except Exception:  # noqa: BLE001 - fail open; never drop real queries
+            has = True
         with self._src_lock:
-            self._src_exist[key] = result
+            self._src_exist[key] = has
             ev.set()
-        return result
+        return has
 
     def _warn_field_mismatch(self, value: str, used: str, other: str) -> None:
         """Emit a one-time warning that a source exists under a different field than
