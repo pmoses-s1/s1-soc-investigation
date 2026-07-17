@@ -53,6 +53,15 @@ USER_CATALOGS = OUTPUT_BASE / "catalogs"   # writable, persists on the output vo
 CATALOG_REPO = os.environ.get("S1IE_CATALOG_REPO", "pmoses-s1/s1-soc-investigation")
 CATALOG_REPO_PATH = os.environ.get("S1IE_CATALOG_REPO_PATH", "catalogs")
 CATALOG_REPO_REF = os.environ.get("S1IE_CATALOG_REPO_REF", "main")
+# Version shown in the UI. CI bakes S1IE_VERSION as "<semver>+<git-sha>" (or a tag);
+# show the clean part without the hash, plus a build date that updates every build.
+_RAW_VERSION = (os.environ.get("S1IE_VERSION") or ENGINE_VERSION).strip()
+VERSION_DISPLAY = _RAW_VERSION.split("+")[0]
+# Build date updates every build and carries no hash. Normalize an ISO timestamp
+# (e.g. 2026-07-17T09:00:00Z) down to the plain date for a clean header.
+BUILD_DATE = os.environ.get("S1IE_BUILD_DATE", "").strip()
+if "T" in BUILD_DATE:
+    BUILD_DATE = BUILD_DATE.split("T")[0]
 # Config datatable placeholders (the {{dt_*}} template vars). Shown as dedicated
 # fields in the Variables modal; the default is the table name in the source workbook.
 DATATABLES = [
@@ -528,14 +537,40 @@ def preview_plan(d: dict) -> dict:
 
 
 def test_connection(d: dict) -> dict:
-    """Confirm the token authenticates by launching a trivial probe query."""
+    """Confirm the token authenticates by launching a trivial probe query.
+
+    Tests the credentials in the request (the values typed in the Connect form),
+    merged over any already-saved creds, so it works before Connect is clicked and
+    after (when the token box has been cleared)."""
     import time as _t
     from s1engine.lrq_client import LRQClient, RequestsTransport, QuerySyntaxError
     from s1engine.rate_limiter import TokenBucket
     from s1engine.slicing import iso_z
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
     mock = bool(d.get("mock"))
-    config = build_config(mock)
+    if mock:
+        config = build_config(True)
+    else:
+        creds = _effective_creds()
+        console_url = (d.get("console_url") or creds.get("console_url") or "").strip().rstrip("/")
+        tokens = d.get("tokens")
+        if isinstance(tokens, str):
+            tokens = [t.strip() for t in tokens.replace("\n", ",").split(",") if t.strip()]
+        if not tokens:
+            tokens = creds.get("tokens") or []
+        acct = d.get("account_ids")
+        if isinstance(acct, str):
+            acct = [a.strip() for a in acct.split(",") if a.strip()]
+        if not acct:
+            acct = creds.get("account_ids") or []
+        rps = float(d.get("rps") or creds.get("rps") or 2.5)
+        if not console_url:
+            return {"ok": False, "error": "Enter your Console URL above "
+                    "(e.g. https://your-tenant.sentinelone.net), then Test connection."}
+        if not tokens:
+            return {"ok": False, "error": "Enter at least one service-user token above to test the connection."}
+        config = load_config(require_credentials=False, console_url=console_url,
+                             tokens=tokens, rps=rps, account_ids=acct)
     transport = None
     if mock:
         from s1engine.testing import FakeTransport
@@ -666,7 +701,8 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/config":
             return self._send(200, {**creds_status(), "catalogs": list_catalogs(),
                                     "output_base": str(OUTPUT_BASE), "exposed": EXPOSED,
-                                    "version": os.environ.get("S1IE_VERSION") or ENGINE_VERSION,
+                                    "version": VERSION_DISPLAY, "build_date": BUILD_DATE,
+                                    "build_full": _RAW_VERSION,
                                     "catalog_repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}",
                                     "datatables": DATATABLES, "subject_vars": SUBJECT_VARS,
                                     "source_vars": _source_vars()})

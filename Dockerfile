@@ -22,12 +22,15 @@ RUN mkdir -p /data && chown -R appuser:appuser /srv /data
 # The app binds 0.0.0.0 INSIDE the container (required for Docker port publishing
 # to reach it). It is NOT authenticated by default, so publish only to the host
 # loopback (see run commands below), or expose with a token.
-# Build version surfaced in the UI (CI passes the git sha; defaults to the package version).
+# Build version surfaced in the UI. The UI shows the clean semver/tag (the git sha
+# suffix is hidden) plus the build date, which updates every build.
 ARG S1IE_VERSION=""
+ARG S1IE_BUILD_DATE=""
 ENV S1IE_PORT=8801 \
     S1IE_HOST=0.0.0.0 \
     S1IE_OUTPUT_DIR=/data \
     S1IE_VERSION=${S1IE_VERSION} \
+    S1IE_BUILD_DATE=${S1IE_BUILD_DATE} \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 

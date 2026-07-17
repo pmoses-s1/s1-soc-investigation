@@ -108,7 +108,7 @@
   <div class="logo">S1</div>
   <div>
     <h1>SOC Case Investigation</h1>
-    <div class="sub">Long-lookback query execution engine for Singularity Data Lake · <span id="ver" title="active build">v-</span></div>
+    <div class="sub">DFIR Long-lookback query execution engine for Singularity Data Lake · <span id="ver" title="active build">v-</span></div>
   </div>
   <span class="conn"><span id="cdot" class="dot"></span><span id="cstat">not connected</span></span>
 </header>
@@ -441,7 +441,8 @@ $("btnRefreshCatalogs").onclick=async()=>{
 
 async function loadConfig(){
   const c=await apiGet("/api/config");
-  if(c.version) $("ver").textContent="v"+c.version;
+  if(c.version){ $("ver").textContent="v"+c.version+(c.build_date?" · "+c.build_date:"");
+    $("ver").title="build "+(c.build_full||c.version); }
   $("outHint").textContent="Default base: "+c.output_base;
   CATALOGS=c.catalogs||[];
   const sel=$("catalog"); const prev=sel.value; sel.innerHTML="";
@@ -863,7 +864,11 @@ $("fromDate").onchange=updateRangeHint; $("toDate").onchange=updateRangeHint;
 /* ---------- test connection ---------- */
 $("btnTestConn").onclick=async()=>{
   const b=$("btnTestConn"); b.disabled=true; $("connMsg").style.color="var(--hint)"; $("connMsg").textContent="Testing…";
-  const r=await apiPost("/api/test_connection",{mock:$("mock").checked}); b.disabled=false;
+  // Send whatever is typed in the form so it works before Connect; the server
+  // falls back to saved creds (the token box is cleared after connecting).
+  const r=await apiPost("/api/test_connection",{mock:$("mock").checked,
+    console_url:$("console").value.trim(), tokens:$("tokens").value.trim(),
+    rps:parseFloat($("rps").value)||2.5, account_ids:$("accts").value.trim()}); b.disabled=false;
   if(r.ok){ $("connMsg").style.color="var(--grn)"; $("connMsg").textContent="Connected"+(r.elapsed_s!=null?` (${r.elapsed_s}s)`:"")+(r.note?" · "+r.note:""); }
   else { $("connMsg").style.color="var(--red)"; $("connMsg").textContent="Failed: "+(r.error||"unknown"); }
 };
