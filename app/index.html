@@ -325,7 +325,19 @@
     <span class="x" id="resClose">&times;</span>
     <h3 id="resTitle">Query result</h3>
     <div class="hint" id="resMeta"></div>
-    <div id="resTable" style="max-height:60vh;overflow:auto;margin-top:10px"></div>
+    <div id="resTable" style="max-height:44vh;overflow:auto;margin-top:10px"></div>
+    <div id="resEditor" style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px;display:none">
+      <div style="font-size:12.5px;color:var(--label);font-weight:600;margin-bottom:6px">Edit / fix this query
+        <span class="help" data-tip="Edit the query template (keep the {{variables}}), Test it against SDL over a short window, Save it back to the catalog, then Re-run the investigation. A fresh run re-executes the fixed query while unchanged queries are served from cache.">?</span>
+      </div>
+      <textarea id="resPq" spellcheck="false" style="min-height:150px"></textarea>
+      <div class="btnrow" style="margin-top:8px">
+        <button class="ghost sm" id="resTest">Test vs SDL</button>
+        <button class="ghost sm" id="resSave">Save to catalog</button>
+        <button class="ghost sm" id="resRerun">Save &amp; re-run investigation</button>
+      </div>
+      <div class="hint" id="resEditStatus"></div>
+    </div>
   </div>
 </div>
 
@@ -650,7 +662,7 @@ function renderVerification(s){
   let h='<table><thead><tr><th>Query</th><th>Status</th><th class="n">Rows</th><th class="n">Done</th>'+
     '<th class="n">Fail</th><th class="n">Skip</th></tr></thead><tbody>';
   rows.forEach(q=>{ const hit=q.result_rows>0;
-    h+=`<tr data-q="${q.query_id}" style="cursor:pointer">`+
+    h+=`<tr data-q="${q.query_id}" data-status="${q.status}" style="cursor:pointer">`+
       `<td>${hit?'<b>':''}${q.query_id}${hit?'</b>':''}<div class="kv">${q.title||""}</div></td>`+
       `<td><span class="pill ${q.status}">${q.status}</span></td>`+
       `<td class="n">${hit?'<b>'+q.result_rows+'</b>':q.result_rows}</td>`+
@@ -663,23 +675,61 @@ function renderVerification(s){
   if(s.workbook)h+=`<div class="kv">Workbook: ${s.workbook}</div>`;
   h+=`<div class="kv">Outputs: ${s.run_dir}</div>`;
   $("vtable").innerHTML=h;
-  [...$("vtable").querySelectorAll("tr[data-q]")].forEach(tr=>tr.onclick=()=>openResult(tr.dataset.q));
+  [...$("vtable").querySelectorAll("tr[data-q]")].forEach(tr=>tr.onclick=()=>openResult(tr.dataset.q, tr.dataset.status));
 }
-function openResult(qid){
+let RES_CTX={};
+function openResult(qid, status){
   $("resTitle").textContent=qid; $("resMeta").textContent="Loading…"; $("resTable").innerHTML="";
+  $("resEditor").style.display="none"; $("resEditStatus").textContent=""; $("resPq").value="";
+  RES_CTX={runId:CURRENT, qid:qid, status:status};
   $("resModal").classList.add("open");
   apiGet(`/api/result?runId=${encodeURIComponent(CURRENT)}&query=${encodeURIComponent(qid)}`).then(r=>{
-    if(r.error){$("resMeta").textContent=r.error;return;}
-    $("resTitle").textContent=r.title||qid;
-    $("resMeta").innerHTML=`${r.total_rows} rows`+(r.total_rows>500?" (showing first 500)":"")
+    $("resTitle").textContent=(r.title||qid);
+    $("resMeta").innerHTML=(r.error?`<span style="color:var(--red)">${r.error}</span> · `:"")
+      +`${r.total_rows||0} rows`+((r.total_rows||0)>500?" (showing first 500)":"")
       +(r.warnings&&r.warnings.length?` · ⚠ ${r.warnings.join("; ")}`:"")
       +(r.pq?`<pre style="white-space:pre-wrap;background:#e0deef;border-radius:8px;padding:8px;margin-top:8px;font-size:11px">${r.pq.replace(/</g,"&lt;")}</pre>`:"");
     const cols=r.columns||[];
-    if(!cols.length){$("resTable").innerHTML='<div class="kv">No columns / no rows.</div>';return;}
-    $("resTable").innerHTML='<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join("")+'</tr></thead><tbody>'+
-      (r.values||[]).map(row=>'<tr>'+cols.map((_,i)=>`<td class="kv">${row[i]==null?"":String(row[i]).slice(0,200)}</td>`).join("")+'</tr>').join("")+'</tbody></table>';
+    $("resTable").innerHTML=cols.length?('<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join("")+'</tr></thead><tbody>'+
+      (r.values||[]).map(row=>'<tr>'+cols.map((_,i)=>`<td class="kv">${row[i]==null?"":String(row[i]).slice(0,200)}</td>`).join("")+'</tr>').join("")+'</tbody></table>')
+      :'<div class="kv">No columns / no rows.</div>';
+  });
+  // Load the editable TEMPLATE (with {{vars}}) so a fix can be saved without hardcoding.
+  apiGet(`/api/query_source?runId=${encodeURIComponent(CURRENT)}&query=${encodeURIComponent(qid)}`).then(s=>{
+    if(s.error || s.pq==null){ return; }   // e.g. not in catalog; leave editor hidden
+    RES_CTX.catalog=s.catalog; RES_CTX.vars=s.vars||{}; RES_CTX.entity=s.entity;
+    $("resPq").value=s.pq;
+    $("resEditor").style.display="block";
+    if(status==="failed"||status==="incomplete"){
+      $("resEditStatus").innerHTML='<span style="color:var(--amb)">This query needs a fix. Edit it, Test, then Save &amp; re-run.</span>';
+    }
   });
 }
+$("resTest").onclick=async()=>{
+  $("resEditStatus").style.color="var(--hint)"; $("resEditStatus").textContent="Testing against SDL…";
+  const r=await apiPost("/api/test_query",{pq:$("resPq").value, vars:RES_CTX.vars||{}, entity:RES_CTX.entity, mock:$("mock").checked});
+  if(r.ok){ $("resEditStatus").style.color="var(--grn)"; $("resEditStatus").textContent="Valid — SDL accepted the query"+(r.rows!=null?` (${r.rows} rows in probe window)`:""); }
+  else { $("resEditStatus").style.color="var(--red)"; $("resEditStatus").textContent="Invalid: "+(r.error||r.status||"rejected"); }
+};
+$("resSave").onclick=async()=>{
+  if(!RES_CTX.catalog){ $("resEditStatus").textContent="No catalog to save to."; return; }
+  $("resEditStatus").style.color="var(--hint)"; $("resEditStatus").textContent="Saving…";
+  const r=await apiPost("/api/update_query",{catalog:RES_CTX.catalog, queryId:RES_CTX.qid, pq:$("resPq").value});
+  if(r.error){ $("resEditStatus").style.color="var(--red)"; $("resEditStatus").textContent="Save failed: "+r.error; return; }
+  RES_CTX.catalog=r.path;   // now points at the editable user copy
+  $("resEditStatus").style.color="var(--grn)"; $("resEditStatus").textContent="Saved to "+r.file+". Re-run to apply the fix.";
+  loadConfig();
+};
+$("resRerun").onclick=async()=>{
+  $("resEditStatus").style.color="var(--hint)"; $("resEditStatus").textContent="Saving and starting a new run…";
+  const sv=await apiPost("/api/update_query",{catalog:RES_CTX.catalog, queryId:RES_CTX.qid, pq:$("resPq").value});
+  if(sv.error){ $("resEditStatus").style.color="var(--red)"; $("resEditStatus").textContent="Save failed: "+sv.error; return; }
+  await loadConfig();
+  const r=await apiPost("/api/rerun",{runId:RES_CTX.runId, mock:$("mock").checked});
+  if(r.error){ $("resEditStatus").style.color="var(--red)"; $("resEditStatus").textContent="Re-run failed: "+r.error; return; }
+  $("resModal").classList.remove("open");
+  viewRun(r.run_id, r.run_dir); loadHistory();
+};
 $("resClose").onclick=()=>$("resModal").classList.remove("open");
 $("resModal").onclick=e=>{if(e.target.id==="resModal")$("resModal").classList.remove("open");};
 

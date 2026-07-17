@@ -550,12 +550,11 @@ queries:
     | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime)
     | let Violations=string(log.violations)
     | let Secrets=string(log.violationFindingsDetails.Secrets)
-    | let Sensitive=string(log.violationFindingsDetails['Sensitive Data'])
     | filter log.eventType == 'text_action'
-    | filter log.latency >= 1000 OR (!isempty(Violations) && Violations != '[]') OR (!isempty(Secrets) && Secrets != '[]') OR (!isempty(Sensitive) && Sensitive != '[]')
+    | filter log.latency >= 1000 OR (!isempty(Violations) && Violations != '[]') OR (!isempty(Secrets) && Secrets != '[]')
     | sort -ts
     | limit 1000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=log.user, App=log.application.name, Domain=log.sensor.pageDomain, Policy=log.policyName, Secrets, Sensitive, Violations, Latency=log.latency, ConvID=log.conversationId, PromptID=log.promptResponseId
+    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=log.user, App=log.application.name, Domain=log.sensor.pageDomain, Policy=log.policyName, Secrets, Violations, Latency=log.latency, ConvID=log.conversationId, PromptID=log.promptResponseId
 - id: trv-01
   title: Navan Travel Bookings
   notes: 'What business travel did the user book? Corroborates geo anomalies in Okta/ZPA. | Source: navan-travel-bookings | Pivot if positive: Trip destination + dates → Okta location in same window for corroboration'

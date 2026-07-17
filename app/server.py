@@ -675,6 +675,131 @@ def save_catalog(d: dict) -> dict:
             "queries": len(cat.enabled_queries())}
 
 
+def _run_meta(run_id: str) -> dict:
+    rd = find_run_dir(run_id) if run_id else None
+    if not rd or not (rd / "run_meta.json").is_file():
+        raise ValueError("run metadata not found")
+    return json.loads((rd / "run_meta.json").read_text())
+
+
+def _resolve_catalog_path(catalog_path: str) -> str:
+    """Prefer an editable user-catalog copy with the same filename (so a saved fix
+    is picked up) over the original (possibly bundled) path."""
+    try:
+        name = Path(catalog_path).name
+    except Exception:
+        return catalog_path
+    user_copy = USER_CATALOGS / name
+    return str(user_copy) if user_copy.is_file() else catalog_path
+
+
+def query_source(run_id: str, query_id: str) -> dict:
+    """Return a query's catalog TEMPLATE pq (with {{vars}}) for a run, so it can be
+    edited and saved without hardcoding the run's substituted values."""
+    meta = _run_meta(run_id)
+    cat_path = _resolve_catalog_path(meta.get("catalog") or "")
+    cat = load_catalog(cat_path)
+    q = next((x for x in cat.queries if x.id == query_id), None)
+    if not q:
+        return {"error": f"query '{query_id}' not found in catalog"}
+    return {"catalog": cat_path, "file": Path(cat_path).name, "query_id": q.id,
+            "title": q.title, "pq": q.pq, "vars": meta.get("vars") or {},
+            "entity": meta.get("entity")}
+
+
+def test_query(d: dict) -> dict:
+    """Launch a single (edited) query over a short window to confirm SDL accepts it.
+    Renders the template with the run's vars first (missing vars get a probe value)."""
+    from s1engine.catalog import Catalog, Query, MergeSpec
+    pq = (d.get("pq") or "").strip()
+    if not pq:
+        return {"ok": False, "error": "query is empty"}
+    variables = dict(d.get("vars") or {})
+    if d.get("entity"):
+        variables.setdefault("entity", d["entity"])
+    tmpl = Query(id="__edit__", title="edited", pq=pq, merge=MergeSpec(kind="rows"))
+    for v in tmpl.required_vars():
+        variables.setdefault(v, "probe")
+    try:
+        rendered = tmpl.render(variables)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"template error: {e}"}
+    mock = bool(d.get("mock"))
+    try:
+        config = build_config(mock)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)[:200]}
+    transport = None
+    if mock:
+        from s1engine.testing import FakeTransport
+        transport = FakeTransport(fail_query_substr={"BROKEN": "syntax"})
+    cat = Catalog(name="__test__", queries=[
+        Query(id="__edit__", title="edited", pq=rendered, merge=MergeSpec(kind="rows"))])
+    res = validate_catalog(config, cat, transport=transport, window_hours=1)
+    r = res[0] if res else {"status": "unknown", "error": "no result"}
+    return {"ok": r.get("status") == "valid", "status": r.get("status"),
+            "error": r.get("error", ""), "rows": r.get("rows"),
+            "match_count": r.get("match_count")}
+
+
+def update_query(d: dict) -> dict:
+    """Replace one query's pq in a catalog and save an editable copy, preserving the
+    other queries. The pq is the TEMPLATE (keeps {{vars}})."""
+    import yaml
+    cat_path = d.get("catalog")
+    qid = d.get("queryId")
+    new_pq = d.get("pq")
+    if not cat_path or not qid or new_pq is None:
+        raise ValueError("catalog, queryId and pq are required")
+    p = Path(cat_path)
+    if not _within(p, _catalog_roots()) or not p.is_file():
+        raise ValueError("catalog not found or not allowed")
+    raw = p.read_text()
+    data = (yaml.safe_load(raw) if p.suffix.lower() in (".yaml", ".yml")
+            else json.loads(raw))
+    qs = data.get("queries") or []
+    if not any(q.get("id") == qid for q in qs):
+        raise ValueError(f"query '{qid}' not found in catalog")
+    for q in qs:
+        if q.get("id") == qid:
+            q["pq"] = new_pq
+
+    class _LS(str):
+        pass
+    yaml.add_representer(_LS, lambda dp, v: dp.represent_scalar(
+        "tag:yaml.org,2002:str", v, style="|"))
+    for q in qs:
+        if isinstance(q.get("pq"), str) and "\n" in q["pq"]:
+            q["pq"] = _LS(q["pq"])
+    USER_CATALOGS.mkdir(parents=True, exist_ok=True)
+    dest = USER_CATALOGS / p.name
+    out = yaml.dump(data, sort_keys=False, allow_unicode=True, width=100000)
+    tmp = dest.with_name(dest.stem + ".__tmp__" + dest.suffix)
+    tmp.write_text(out)
+    try:
+        cat = load_catalog(tmp)
+    except Exception as e:  # noqa: BLE001
+        tmp.unlink(missing_ok=True)
+        raise ValueError(f"updated catalog did not validate: {e}")
+    tmp.replace(dest)
+    return {"ok": True, "path": str(dest), "file": p.name, "query_id": qid,
+            "queries": len(cat.enabled_queries())}
+
+
+def rerun_run(d: dict) -> dict:
+    """Start a NEW run for the same case/params as an existing run, using the current
+    (possibly just-fixed) catalog. A fresh run re-plans, so an edited query re-executes
+    and unchanged queries are served from cache."""
+    meta = _run_meta(d.get("runId"))
+    cat_path = _resolve_catalog_path(meta.get("catalog") or "")
+    sd = {"case": meta["case"], "entity": meta["entity"], "catalog": cat_path,
+          "lookback": meta.get("lookback"), "sliceDays": meta.get("sliceDays"),
+          "startDate": meta.get("startDate"), "endDate": meta.get("endDate"),
+          "vars": meta.get("vars") or {}, "queryIds": meta.get("queryIds"),
+          "outputDir": meta.get("outputDir") or "", "mock": bool(d.get("mock"))}
+    return start_run(sd)   # no runId -> new run id
+
+
 # ------------------------------------------------------------------- handler
 class H(BaseHTTPRequestHandler):
     def _send(self, code, body, ctype="application/json", headers=None):
@@ -721,6 +846,12 @@ class H(BaseHTTPRequestHandler):
             if not run_dir:
                 return self._send(404, {"error": "unknown run"})
             return self._send(200, read_result(run_dir, qs.get("query", [""])[0]))
+        if p == "/api/query_source":
+            try:
+                return self._send(200, query_source(qs.get("runId", [""])[0],
+                                                     qs.get("query", [""])[0]))
+            except Exception as e:  # noqa: BLE001
+                return self._send(400, {"error": str(e)})
         if p == "/api/activity":
             rid = qs.get("runId", [""])[0]
             since = int(qs.get("since", ["0"])[0])
@@ -875,6 +1006,12 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, test_connection(d))
             if p == "/api/resume":
                 return self._send(200, resume_run(d))
+            if p == "/api/rerun":
+                return self._send(200, rerun_run(d))
+            if p == "/api/test_query":
+                return self._send(200, test_query(d))
+            if p == "/api/update_query":
+                return self._send(200, update_query(d))
             if p == "/api/catalog_save":
                 return self._send(200, save_catalog(d))
             if p == "/api/refresh_catalogs":
