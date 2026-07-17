@@ -480,9 +480,10 @@ function renderProgress(s){
   const el=(Date.now()-RUN_START)/1000, rate=el>0?done/el:0, remaining=total-done;
   if(s.status==="running" && rate>0 && remaining>0) $("etaText").textContent=`~${fmtDur(remaining/rate)} left · ${rate.toFixed(1)}/s`;
   else if(s.status!=="running") $("etaText").textContent=`finished in ${fmtDur(el)}`;
-  const tiles=[["done",t.done||0],["cached",COUNTS.cached],["failed",t.failed||0],
-    ["pending",(t.pending||0)+(t.in_flight||0)],["throttled",COUNTS.throttled],["retried",COUNTS.retried]];
-  $("liveTiles").innerHTML=tiles.map(([k,v])=>`<span class="stat">${k} <b>${v}</b></span>`).join("");
+  const tiles=[["done",t.done||0],["running",t.in_flight||0],["pending",t.pending||0],
+    ["cached",COUNTS.cached],["failed",t.failed||0],["throttled",COUNTS.throttled],["retried",COUNTS.retried]];
+  $("liveTiles").innerHTML=tiles.map(([k,v])=>`<span class="stat">${k} <b>${v}</b></span>`).join("")
+    +`<span class="stat" style="color:var(--hint)">running = queries executing in parallel now</span>`;
 }
 function notifyDone(s){
   try{ if(window.Notification && Notification.permission==="granted")
@@ -544,7 +545,7 @@ function fmt(e){switch(e.event){
   case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
   case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
   case"throttled":return `throttled ${e.query} [${e.slice}] backing off (gov=${e.gov_limit})`;
-  case"retry":return `retry ${e.query} [${e.slice}] attempt ${e.attempt}`;
+  case"retry":return `retry ${e.query} [${e.slice}] attempt ${e.attempt}${e.error?": "+e.error:""}`;
   case"query_skipped":return `skipped ${e.query} (needs ${(e.missing||[]).join(", ")})`;
   case"workbook":return `workbook → ${e.path}`;
   case"cancelling":return "cancel requested — stopping after in-flight slices finish";
@@ -603,6 +604,8 @@ function renderVerification(s){
       `<td class="n">${hit?'<b>'+q.result_rows+'</b>':q.result_rows}</td>`+
       `<td class="n">${q.done}</td><td class="n">${q.failed+q.permanent}</td>`+
       `<td class="n">${q.pending+q.in_flight}</td></tr>`;
+    if((q.status==="failed"||q.status==="incomplete")&&q.last_error)
+      h+=`<tr><td colspan="6" class="kv" style="color:var(--red)">✕ ${String(q.last_error).replace(/</g,"&lt;")}</td></tr>`;
     if(q.warnings&&q.warnings.length)h+=`<tr><td colspan="6" class="kv">⚠ ${q.warnings.join("; ")}</td></tr>`;});
   h+='</tbody></table><div class="kv" style="margin-top:6px">Click a query to preview its results.</div>';
   if(s.workbook)h+=`<div class="kv">Workbook: ${s.workbook}</div>`;

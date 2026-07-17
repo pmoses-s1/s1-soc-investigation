@@ -26,6 +26,7 @@ import threading
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
@@ -794,6 +795,44 @@ class H(BaseHTTPRequestHandler):
         pass
 
 
+def _ensure_output_writable() -> Optional[str]:
+    """Create the output folders and confirm they are writable.
+
+    Returns None on success, or a human-readable remediation message on failure.
+    The common failure is a Docker host bind mount owned by a different user than
+    the container's non-root runtime user, so the message tells the user exactly
+    how to fix it rather than crashing with a traceback.
+    """
+    uid = getattr(os, "getuid", lambda: "?")()
+    try:
+        OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
+        USER_CATALOGS.mkdir(parents=True, exist_ok=True)
+        probe = OUTPUT_BASE / ".write_test"
+        probe.write_text("ok")
+        probe.unlink()
+        return None
+    except (PermissionError, OSError) as e:
+        return (
+            "\n================ CANNOT WRITE TO THE OUTPUT FOLDER ================\n"
+            f"  path         : {OUTPUT_BASE}\n"
+            f"  runtime user : uid={uid}\n"
+            f"  reason       : {e}\n\n"
+            "The engine writes ledgers, logs, results, and the workbook here, so it\n"
+            "needs a writable output folder. The mounted host folder is not writable\n"
+            "by the container's runtime user. Fix it with ONE of these, then re-run:\n\n"
+            "  1) Make your host folder writable (simplest):\n"
+            "       mkdir -p ./investigations && chmod -R u+rwX,g+rwX ./investigations\n"
+            "     or grant the container's user id explicitly:\n"
+            "       sudo chown -R 10001:10001 ./investigations\n\n"
+            "  2) Run the container as your own user:\n"
+            "       docker run --user \"$(id -u):$(id -g)\" -v \"$PWD/investigations:/data\" ...\n\n"
+            "  3) Use a Docker named volume instead of a host bind mount:\n"
+            "       docker volume create s1soc && docker run -v s1soc:/data ...\n\n"
+            "  Not using Docker? Point S1IE_OUTPUT_DIR at a folder you can write to:\n"
+            "       S1IE_OUTPUT_DIR=/absolute/writable/path python app/server.py\n"
+            "==================================================================\n")
+
+
 def main() -> int:
     if EXPOSED and not AUTH_TOKEN:
         sys.stderr.write(
@@ -802,8 +841,10 @@ def main() -> int:
             "UI at ?token=<secret>, or unset S1IE_BIND_ALL and publish to the host loopback "
             "only (docker run -p 127.0.0.1:8901:8801 ...).\n")
         return 2
-    OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
-    USER_CATALOGS.mkdir(parents=True, exist_ok=True)
+    problem = _ensure_output_writable()
+    if problem:
+        sys.stderr.write(problem)
+        return 2
     st = creds_status()
     print(f"s1-soc-investigation  ->  http://localhost:{PORT}")
     print(f"console               ->  {st['console_url'] or '(not set; use the Connect panel)'}")

@@ -36,6 +36,7 @@ class QueryVerification:
     result_rows: int
     status: str            # "pass" | "failed" | "incomplete"
     warnings: List[str] = field(default_factory=list)
+    last_error: str = ""   # sample error from a failed/permanent slice, for the UI
 
 
 @dataclass
@@ -93,12 +94,26 @@ def verify_run(ledger: Ledger, run_id: str, catalog: Catalog,
             warns.append("contains estimate_distinct columns; merged distinct "
                          "counts are approximate across slices")
 
+        # Surface a sample error so the analyst can see WHY a query failed/stalled,
+        # not just that it did. Prefer a permanent (query-level) error over transient.
+        last_error = ""
+        for j in jobs:
+            err = getattr(j, "error", None)
+            if not err:
+                continue
+            if j.state == STATE_PERMANENT:
+                last_error = str(err)[:300]
+                break
+            if j.state in (STATE_FAILED, STATE_PENDING, STATE_IN_FLIGHT):
+                last_error = str(err)[:300]
+
         qvs.append(QueryVerification(
             query_id=q.id, title=q.title, slices_total=len(jobs),
             done=counts[STATE_DONE], failed=counts[STATE_FAILED],
             permanent=counts[STATE_PERMANENT], pending=counts[STATE_PENDING],
             in_flight=counts[STATE_IN_FLIGHT], subdivided=counts[STATE_SUBDIVIDED],
-            result_rows=int(result_rows.get(q.id, 0)), status=status, warnings=warns))
+            result_rows=int(result_rows.get(q.id, 0)), status=status, warnings=warns,
+            last_error=last_error))
 
     ran = [qv for qv in qvs if qv.status != "skipped"]
     passed = len(ran) > 0 and all(qv.status == "pass" for qv in ran)
