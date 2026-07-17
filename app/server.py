@@ -221,20 +221,46 @@ def _resolve_output_dir(raw):
     return p if p.is_absolute() else (OUTPUT_BASE / p)
 
 
+def _safe_iterdir(path: Path):
+    """List a directory's entries, tolerating it (or entries) vanishing or being
+    inaccessible. Directory scans race with runs creating/removing folders, and
+    pathlib's iterdir/glob raise FileNotFoundError if a dir disappears mid-scan."""
+    try:
+        return list(path.iterdir())
+    except (FileNotFoundError, NotADirectoryError, PermissionError, OSError):
+        return []
+
+
 def find_run_dir(run_id: str):
     reg = _RUNS.get(run_id)
     if reg:
         return Path(reg["run_dir"])
-    if OUTPUT_BASE.is_dir():
-        for case_dir in OUTPUT_BASE.iterdir():
-            cand = case_dir / run_id
-            if (cand / "ledger.db").is_file():
-                return cand
+    for case_dir in _safe_iterdir(OUTPUT_BASE):
+        cand = case_dir / run_id
+        if (cand / "ledger.db").is_file():
+            return cand
     return None
 
 
+# Windows reserved device names that can never be used as a path component.
+_WIN_RESERVED = {"CON", "PRN", "AUX", "NUL",
+                 *(f"COM{i}" for i in range(1, 10)),
+                 *(f"LPT{i}" for i in range(1, 10))}
+
+
 def _safe(name: str) -> str:
-    return "".join(c if c.isalnum() or c in "-_." else "_" for c in str(name))
+    """Make a filesystem-safe, cross-OS path component from user input.
+
+    Keeps alphanumerics and -_. ; replaces everything else with _. Also strips
+    leading/trailing dots and spaces (invalid/trimmed on Windows), avoids Windows
+    reserved device names, never returns empty, and caps length for path limits."""
+    s = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(name)).strip()
+    s = s.strip(". ")
+    if not s:
+        s = "unnamed"
+    if s.upper() in _WIN_RESERVED:
+        s = "_" + s
+    return s[:120]
 
 
 def start_run(d: dict) -> dict:
@@ -532,15 +558,22 @@ def test_connection(d: dict) -> dict:
 
 
 def list_history(limit: int = 50) -> list:
-    """Scan the output folder for past runs (survives restarts)."""
+    """Scan the output folder for past runs (survives restarts).
+
+    Walks <output>/<case>/<run_id>/run_meta.json defensively: case and run dirs
+    are created and removed by concurrent runs, so any entry may vanish mid-scan."""
     runs = []
-    if OUTPUT_BASE.is_dir():
-        for meta in OUTPUT_BASE.glob("*/*/run_meta.json"):
+    for case_dir in _safe_iterdir(OUTPUT_BASE):
+        if not case_dir.is_dir():
+            continue
+        for rd in _safe_iterdir(case_dir):
+            meta = rd / "run_meta.json"
+            if not meta.is_file():
+                continue
             try:
                 m = json.loads(meta.read_text())
             except Exception:
                 continue
-            rd = meta.parent
             rid = m.get("run_id") or rd.name
             status = "unknown"
             live = _RUNS.get(rid)
