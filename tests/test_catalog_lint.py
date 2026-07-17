@@ -17,17 +17,18 @@ def test_bundled_catalogs_lint_clean():
 
 
 def test_linter_flags_known_bad_patterns():
-    assert lint_query("x | filter owner == null")          # 500
-    assert lint_query("x | let s=a['Sensitive Data']")     # bracket index 400
-    assert lint_query("x contains 'foo'")                  # bare contains
-    assert lint_query("x | head 5")                        # head
-    assert lint_query("x | sort ts desc")                  # sort desc
+    assert lint_query("x | filter owner == null")          # 500 (verified)
+    assert lint_query("x | let s=a['Sensitive Data']")     # bracket index 400 (verified)
+    assert lint_query("x | head 5")                        # head 400 (verified)
+    assert lint_query("x | sort ts desc")                  # sort desc 400 (verified)
     assert lint_query("x | filter name contains:anycase('<APP_NAME>')")  # placeholder
 
 
 def test_linter_allows_valid_patterns():
-    # != null and field=* (existence) and top-level quoted fields are all valid.
-    assert not lint_query("x | filter ts != null | limit 1")
-    assert not lint_query("x | filter serverHost=* | limit 1")
-    assert not lint_query('x | filter "Source User" contains:anycase("a") | limit 1')
+    # All verified valid against the live tenant, so must NOT be flagged:
+    assert not lint_query("x | filter ts != null | limit 1")               # != null
+    assert not lint_query("x | filter serverHost=* | limit 1")             # field=* existence
+    assert not lint_query('x | filter "Source User" contains:anycase("a") | limit 1')  # quoted field
+    assert not lint_query("x | filter p contains 'exe' | limit 1")          # bare (case-sensitive) contains
+    assert not lint_query("x | nolimit")                                    # nolimit is valid
     assert not lint_query("x | filter name contains:anycase('{{app_name}}') | sort -ts | limit 10")

@@ -10,9 +10,11 @@ SDL reject a query at run time, so they are caught before a 90-day investigation
                                   (HTTP 400). A top-level "quoted field" reference is
                                   fine and is not flagged.
   - `<X>` or `%X%`             -> un-converted placeholder; use `{{var}}`.
-  - bare `contains 'x'`        -> use `contains:anycase("x")` (bare contains is 400).
   - `| head N`                 -> invalid; use `| limit N`.
   - `sort field desc|asc`      -> invalid; use `sort -field` / `sort field`.
+
+Deliberately NOT flagged (verified valid on the tenant): `field != null`, `field=*`,
+top-level "quoted field" references, bare case-sensitive `contains 'x'`, and `nolimit`.
 
 These mirror the PowerQuery rules the engine's error classification enforces live,
 so a catalog that lints clean here should not be marked `permanent` mid-run for
@@ -37,8 +39,6 @@ _CHECKS = [
      "dot-quote sub-field obj.\"key\" is unsupported (HTTP 400)"),
     (re.compile(r"<[A-Za-z][A-Za-z0-9_]*>|%[A-Za-z][A-Za-z0-9_]*%"),
      "un-converted placeholder (<X> or %X%); use {{var}}"),
-    (re.compile(r"\bcontains\s+['\"]"),
-     "bare `contains`; use `contains:anycase(\"...\")`"),
     (re.compile(r"\|\s*head\b"),
      "`| head` is invalid; use `| limit N`"),
     (re.compile(r"\bsort\b[^|\n]*\b(?:desc|asc)\b"),

@@ -118,3 +118,23 @@ queries:
     | let coverBytesPerScanBytes=tbCovered/tbScanned
     | sort -tbScanned
     | limit 100
+- id: query-cost-telemetry
+  title: Query Cost Telemetry
+  notes: 'Source: scalyr-metalog | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_scalyr_metalog|scalyr-metalog}}' tag = 'QueryExecutive.query' user='{{entity}}' | group tbCovered=sum(coverBytes)/1000/1000/1000/1000, tbScanned=sum(columnFaultBytes)/1000/1000/1000/1000, cpuSeconds=sum(queryComputationCpuNs)/1000/1000/1000, tbMemoryUsed=sum(heapAllocatedBytes)/1000/1000/1000/1000, columnsQueriedPerEpoch=sum(columnsFaulted)/sum(epochsQueried) by lrqToken | let coverBytesPerScanBytes=tbCovered/tbScanned | sort -tbScanned | nolimit
+  merge:
+    kind: aggregate
+    key_cols:
+    - lrqToken | let coverBytesPerScanBytes
+    sum_cols:
+    - tbCovered
+    - tbScanned
+    - cpuSeconds
+    - tbMemoryUsed
+    - columnsQueriedPerEpoch
+- id: imported-searches-query-telemetry-search-09
+  title: Query Telemetry search 09
+  notes: 'Source: scalyr-metalog | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_scalyr_metalog|scalyr-metalog}}' user='{{entity}}' action='launchQuery' | columns timestamp, Search=queryGroupRequest.queries, PreFilter=queryGroupRequest.preFilter | sort -timestamp | nolimit0
+  merge:
+    kind: append

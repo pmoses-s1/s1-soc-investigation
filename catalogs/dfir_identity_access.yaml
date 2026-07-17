@@ -237,3 +237,45 @@ queries:
     | sort -timestamp
     | limit 1000
     | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, User=loggedAsUserName, Event=event.name, Record=record, IP=ipAddress
+- id: okt-06-2
+  title: Okta Device Activations
+  notes: 'Source: okta | Imported/generated for SOC investigation library.'
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' eventType=''device.lifecycle.activate'' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Details=device.os+'' ''+device.type+" device ''"+event.app_name+"'' added from "+request.ipChain.geographicalContext.city+'', ''+client.geographicalContext.country+'' ip: ''+request.ipChain.ip'
+  merge:
+    kind: append
+- id: okt-04-2
+  title: Okta Failed Events
+  notes: 'Source: okta | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='FAILURE' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Reason=outcome.reason, IP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, OS=client.userAgent.os, Browser=client.userAgent.browser
+  merge:
+    kind: append
+- id: okt-01-2
+  title: Okta Full Raw Timeline
+  notes: 'Source: okta | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Actor=actor.alternateId, EventType=eventType, Result=outcome.result, ActorIP=actor.ip, ClientIP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, ISP=actor.isp, OS=client.userAgent.os, Browser=client.userAgent.browser, RawUA=client.userAgent.rawUserAgent
+  merge:
+    kind: append
+- id: okt-05-2
+  title: Okta MFA Factor Activations
+  notes: 'Source: okta | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Factor=target.displayName, IP=client.ipAddress, Country=client.geographicalContext.country, Reason=outcome.reason
+  merge:
+    kind: append
+- id: okt-07-2
+  title: Okta Offboarding — Lifecycle Events
+  notes: 'Source: okta | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_okta|okta}}' | filter target contains:anycase('{{entity}}') OR actor.alternateId == '{{entity}}' | filter eventType in ('user.lifecycle.deactivate','user.session.clear','user.account.update_password','group.user_membership.remove','app.user_membership.remove') | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Actor=actor.alternateId, Target=target.alternateId, IP=client.ipAddress
+  merge:
+    kind: append
+- id: slk-02-2
+  title: Slack Non-Corporate Device Downloads
+  notes: 'Source: slack | Imported/generated for SOC investigation library.'
+  pq: serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action in ('file_downloaded','file_shared','file_uploaded','file_deleted') | filter !(context.ua contains:anycase 'Windows NT 10.0.26100') | filter !(context.ua contains:anycase 'OKTA') | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot') | filter !(context.ua contains:anycase 'Scio Search') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Action=action, File=entity.file.name, FileID=entity.file.id, IP=context.ip_address, UA=context.ua, URL=details.url_private
+  merge:
+    kind: append
+- id: mitre-t1098-account-manipulation
+  title: Account or permission manipulation
+  notes: 'Generated SOC library detection. Source: identity. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
+  pq: serverHost in ('okta','salesforce_audit','atlassian-cloud-enterprise','github_org_auth') | filter actor.alternateId contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR username contains:anycase('{{username}}') | filter eventType contains:anycase('user.mfa.factor.activate','group.user_membership','app.user_membership') OR Action contains:anycase('permission','profile','role','user') OR action contains:anycase('permission','token','admin','group') | columns timestamp, serverHost, actor.alternateId, actor.email, username, eventType, Action, action, target, ipAddress | sort -timestamp | limit 5000
+  merge:
+    kind: append

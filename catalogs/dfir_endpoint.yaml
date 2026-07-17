@@ -178,3 +178,78 @@ queries:
     | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(user.name || src.process.user), Proc, Cmd
     | sort -timestamp
     | limit 2000
+- id: opl-06-2
+  title: Orphaned / Unknown Owner Software
+  notes: 'Which high-risk apps are installed on endpoints without an owner? | Source: oplockdown | Pivot if positive: Asset inventory, EDR endpoint.name, device owner lookup'
+  pq: |-
+    serverHost='{{src_oplockdown|oplockdown}}'
+    | filter owner == '-' OR !owner OR owner == ''
+    | group
+        Endpoints=estimate_distinct(endpoint.name),
+        FirstRecord.timestamp=min(timestamp),
+        LastRecord.timestamp=max(timestamp),
+        AppLastSeen.timestamp=max(lastseen)
+    by app_name, tag, endpoint.name, owner
+    | sort -AppLastSeen.timestamp
+    | limit 2000
+  merge:
+    kind: aggregate
+    key_cols:
+    - app_name
+    - tag
+    - endpoint.name
+    - owner
+    min_cols:
+    - FirstRecord.timestamp
+    max_cols:
+    - LastRecord.timestamp
+    - AppLastSeen.timestamp
+- id: dash-4-remote-access-vpn-p2p-remote-access-vpn-p2p-installed
+  title: Remote Access / VPN / P2P Installed
+  notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '4. Remote Access / VPN / P2P'.
+  pq: serverHost='{{src_oplockdown|oplockdown}}' | filter tag in ('VPN','RemoteManagement','Peer-To-Peer','Games') | group Endpoints=estimate_distinct(endpoint.name), Users=estimate_distinct(owner), LastSeen.timestamp=max(lastseen) by app_name, tag | sort -Endpoints | limit 1000
+  merge:
+    kind: aggregate
+    key_cols:
+    - app_name
+    - tag
+    max_cols:
+    - LastSeen.timestamp
+- id: dash-7-usb-endpoint-staging-large-archive-creation-50mb
+  title: Large Archive Creation >50MB
+  notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '7. USB / Endpoint Staging'.
+  pq: event.type in ('File Creation','File Modification') | filter tgt.file.extension in:anycase('zip','rar','7z','tar','gz','tgz','pst','mbox') | let Size=(tgt.file.size || file.size || 0) | filter Size > 50000000 | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, SizeMB=(Size/1024/1024), Proc=(src.process.name || process.name || src.process.image.path), Cmd=src.process.cmdline | sort -ts.timestamp | limit 3000
+  merge:
+    kind: append
+- id: dash-2-oplockdown-software-risk-software-inventory-by-app-tag
+  title: Software Inventory by App / Tag
+  notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '2. OpLockdown Software Risk'.
+  pq: serverHost='{{src_oplockdown|oplockdown}}' | group Endpoints=estimate_distinct(endpoint.name), Users=estimate_distinct(owner), FirstRecord.timestamp=min(timestamp), LastRecord.timestamp=max(timestamp), AppLastSeen.timestamp=max(lastseen) by app_name, tag | sort -Endpoints | limit 1000
+  merge:
+    kind: aggregate
+    key_cols:
+    - app_name
+    - tag
+    min_cols:
+    - FirstRecord.timestamp
+    max_cols:
+    - LastRecord.timestamp
+    - AppLastSeen.timestamp
+- id: dash-2-oplockdown-software-risk-unowned-orphaned-software
+  title: Unowned / Orphaned Software
+  notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '2. OpLockdown Software Risk'.
+  pq: serverHost='{{src_oplockdown|oplockdown}}' | filter owner == '-' OR !owner OR owner == '' | columns timestamp, endpoint.name, app_name, tag, severity, LastSeen.timestamp=lastseen | sort -LastSeen.timestamp | limit 2000
+  merge:
+    kind: append
+- id: dash-3-edr-staging-tooling-large-archive-creation-50mb
+  title: Large Archive Creation >50MB
+  notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '3. EDR Staging & Tooling'.
+  pq: '| filter event.type == ''File Creation'' AND tgt.file.extension in:anycase(''zip'',''rar'',''7z'',''tar'',''gz'',''tgz'',''pst'',''mbox'') | let Size=(tgt.file.size || file.size || 0) | filter Size > 50000000 | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, SizeMB=(Size/1024/1024), Proc=(src.process.name || src.process.image.path), Cmd=src.process.cmdline | sort -timestamp | limit 2000'
+  merge:
+    kind: append
+- id: dash-11-raw-quick-pivots-raw-edr-user-endpoint-timeline
+  title: Raw EDR User / Endpoint Timeline
+  notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '11. Raw Quick Pivots'.
+  pq: event.category in ('file','process','dns','ip') | columns timestamp=(event.time || timestamp), event.category, event.type, endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc=(src.process.name || process.name), Cmd=(src.process.cmdline || process.cmdline), File=tgt.file.path, DNS=event.dns.request, DstIP=dst.ip.address, Storyline=src.process.storyline.id | sort -timestamp | limit 5000
+  merge:
+    kind: append
