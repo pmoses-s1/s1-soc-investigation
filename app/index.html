@@ -200,9 +200,10 @@
       <input id="outputDir" placeholder="(default output base)">
       <div class="hint" id="outHint"></div>
       <div class="row">
-        <div><label>Worker pool <span class="help" data-tip="How many slices run at once. Blank = number of tokens x 3. The engine auto-tunes this down if the backend returns rate-limit errors, and back up on sustained success.">?</span></label><input id="pool" type="number" placeholder="tokens x 3"></div>
+        <div><label>Worker pool <span class="help" data-tip="How many slices run at once. Auto-sized to tokens × 3 as you add tokens; type a value to override, or clear it to auto-size again. The engine further auto-tunes concurrency down on rate-limit errors and back up on sustained success.">?</span></label><input id="pool" type="number" placeholder="tokens x 3"></div>
         <div><label>Max attempts <span class="help" data-tip="Transient retries per slice before it is subdivided or marked failed. Query syntax errors are never retried.">?</span></label><input id="maxAttempts" type="number" value="4"></div>
       </div>
+      <div class="hint" id="tuneHint"></div>
       <div class="row">
         <div><label>Priority <span class="help" data-tip="LRQ queue priority. LOW is cheaper and fine for background batches; HIGH for urgent interactive work.">?</span></label>
           <select id="priority"><option>LOW</option><option>HIGH</option></select></div>
@@ -336,6 +337,7 @@ const $=id=>document.getElementById(id);
 let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
 let DTS=[], MODE="single", SUBJECTS=[], BATCH=[], BATCHPOLL=null;
 let RUN_START=0, COUNTS={cached:0,throttled:0,retried:0,subdivided:0,failed:0,done:0}, SELECTED_QIDS=null, CONNECTED=false;
+let TOKEN_COUNT=0, poolEdited=false;
 let VARS={};
 try{ VARS=JSON.parse(localStorage.getItem("s1ie_vars")||"{}"); }catch(e){ VARS={}; }
 const KNOWN_VARS=["hostname","agent_uuid","ip","username","sf_user_id","session"];
@@ -413,8 +415,10 @@ function renderDtFields(){
 }
 function setConn(ok,url,n){
   CONNECTED=!!ok;
+  if(typeof n==="number") TOKEN_COUNT=n;
   $("cdot").className="dot"+(ok?" on":"");
   $("cstat").textContent=ok?`connected · ${n} token${n==1?"":"s"}`:"not connected";
+  if(typeof autotune==="function") autotune();
   // Collapse the Connect panel once connected; reopen via Edit.
   if(ok){
     $("connectBody").style.display="none";
@@ -774,11 +778,13 @@ function pollBatch(){
 }
 
 function updateRangeHint(){
-  const f=$("fromDate").value, t=$("toDate").value;
-  if(f&&t){ const days=Math.round((new Date(t)-new Date(f))/86400000)+1;
-    $("rangeHint").textContent=`Window: ${f} → ${t} (${days} day${days==1?"":"s"}); overrides lookback days.`; }
+  const f=$("fromDate").value, t=$("toDate").value, active=!!(f&&t);
+  // Date range and lookback are mutually exclusive; the fixed range wins, so grey out lookback when active.
+  const lb=$("lookback"); lb.disabled=active; lb.style.opacity=active?".45":"";
+  if(active){ const days=Math.round((new Date(t)-new Date(f))/86400000)+1;
+    $("rangeHint").textContent=`Fixed window: ${f} to ${t} (${days} day${days==1?"":"s"}). Lookback days is ignored while a range is set.`; }
   else if(f||t){ $("rangeHint").textContent="Set both From and To to use a fixed date range."; }
-  else { $("rangeHint").textContent=""; }
+  else { $("rangeHint").textContent="Using lookback days. Set From and To to investigate a fixed window instead."; }
 }
 $("fromDate").onchange=updateRangeHint; $("toDate").onchange=updateRangeHint;
 
@@ -841,18 +847,42 @@ $("btnHistoryRefresh").onclick=loadHistory;
 
 /* ---------- persist run form ---------- */
 const FORM_FIELDS=["case","catalog","lookback","sliceDays","outputDir","pool","maxAttempts","priority","fromDate","toDate"];
-function saveForm(){ const o={}; FORM_FIELDS.forEach(k=>{if($(k))o[k]=$(k).value;}); o.subdivide=$("subdivide").checked; o.useCache=$("useCache").checked; try{localStorage.setItem("s1ie_form",JSON.stringify(o));}catch(e){} }
+function saveForm(){ const o={}; FORM_FIELDS.forEach(k=>{if($(k))o[k]=$(k).value;}); o.subdivide=$("subdivide").checked; o.useCache=$("useCache").checked; o.poolEdited=poolEdited; try{localStorage.setItem("s1ie_form",JSON.stringify(o));}catch(e){} }
 function restoreForm(){ let o={}; try{o=JSON.parse(localStorage.getItem("s1ie_form")||"{}");}catch(e){}
   FORM_FIELDS.forEach(k=>{ if(o[k]==null||o[k]===""||!$(k))return;
     if(k==="catalog"){ if(CATALOGS.some(c=>c.path===o[k])) $(k).value=o[k]; }  // skip stale catalog paths
     else $(k).value=o[k]; });
+  if(o.poolEdited) poolEdited=true;   // a manual pool override survives reloads
   if(o.subdivide!=null)$("subdivide").checked=o.subdivide; if(o.useCache!=null)$("useCache").checked=o.useCache; }
 FORM_FIELDS.forEach(k=>{ const el=$(k); if(el) el.addEventListener("change",saveForm); });
 $("subdivide").addEventListener("change",saveForm); $("useCache").addEventListener("change",saveForm);
 
+/* ---------- auto-tune worker pool from token count ---------- */
+function countTokens(){
+  const txt=($("tokens").value||"").trim();
+  if(txt) return txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean).length;
+  return TOKEN_COUNT;   // textarea is cleared after connecting; fall back to server-reported count
+}
+function autotune(){
+  const n=countTokens(), rps=parseFloat($("rps").value)||2.5;
+  if(n>0 && !poolEdited) $("pool").value=n*3;   // recommended pool = tokens × 3
+  if(n>0){
+    const pool=parseInt($("pool").value)||n*3;
+    $("tuneHint").innerHTML=(poolEdited
+        ? `Manual worker pool <b>${pool}</b> (auto would be ${n}×3=${n*3}; clear the field to auto-size). `
+        : `Auto-sized for <b>${n}</b> token${n==1?"":"s"}: worker pool <b>${pool}</b> (${n}×3). `)
+      + `~${(n*rps).toFixed(1)} rps aggregate. The engine still tunes concurrency live.`;
+  } else {
+    $("tuneHint").textContent="Add tokens in Connect to auto-size the worker pool (tokens × 3).";
+  }
+}
+$("pool").addEventListener("input",()=>{ poolEdited=($("pool").value.trim()!==""); autotune(); saveForm(); });
+$("tokens").addEventListener("input",autotune);
+$("rps").addEventListener("input",autotune);
+
 setMode("single");
 loadConfig().then(()=>{
-  restoreForm(); updateCatVars(); updatePreview(); loadHistory();
+  restoreForm(); updateCatVars(); updatePreview(); loadHistory(); updateRangeHint(); autotune();
   if(window.Notification && Notification.permission==="default"){ try{Notification.requestPermission();}catch(e){} }
 });
 </script>

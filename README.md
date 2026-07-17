@@ -108,7 +108,9 @@ merge-aware reassembly (count/sum additive, min/max reduce, estimate_distinct fl
 **Throughput.** The LRQ v2 async lifecycle (launch/poll/cancel with the forward tag), a per-token
 token-bucket rate governor (~2.5 rps under the 3 rps per-user cap), a worker pool that round-robins
 across multiple service-user tokens, and an AIMD controller that shrinks concurrency on 429s and grows
-on success, self-tuning to whatever the backend tolerates.
+on success, self-tuning to whatever the backend tolerates. The UI auto-sizes the worker pool to
+tokens x 3 as you add tokens, and shows the resulting aggregate rate; type a pool value to override, or
+clear it to auto-size again.
 
 **Content-addressed cache.** Immutable past-day slices are keyed by hash(query + window + scope) and
 reused across runs, so re-running an investigation, or a second overlapping one, executes only the new
