@@ -267,7 +267,8 @@ class InvestigationEngine:
             with self._broken_lock:
                 reason = self._broken.get(job.query_id)
             if reason is not None:
-                ledger.mark_permanent(job.job_id, error=f"aborted: query rejected earlier ({reason})")
+                ledger.mark_permanent(job.job_id,
+                                      error=f"aborted: query failed earlier and needs a fix ({reason})")
                 stats["aborted"] += 1
                 self._emit({"event": "slice_aborted", "query": job.query_id,
                             "slice": job.slice_key})
@@ -383,6 +384,17 @@ class InvestigationEngine:
         stats["failed"] += 1
         self._emit({"event": "slice_failed", "query": job.query_id,
                           "slice": job.slice_key, "error": err[:200]})
+        # Retries AND subdivision are both exhausted and the slice still failed.
+        # A transient blip would have recovered by now, so this is a deterministic
+        # query error (e.g. a 500 from a malformed query). Trip the circuit breaker
+        # so the query's remaining slices are skipped, and flag that it needs a fix.
+        if params.abort_query_on_permanent:
+            with self._broken_lock:
+                first = job.query_id not in self._broken
+                self._broken[job.query_id] = err[:200]
+            if first:
+                self._emit({"event": "query_needs_fix", "query": job.query_id,
+                            "error": err[:200]})
 
     def _subdivide_job(self, job: Job, ledger: Ledger) -> List[Job]:
         sl = Slice(datetime.fromisoformat(job.slice_start.replace("Z", "+00:00")),

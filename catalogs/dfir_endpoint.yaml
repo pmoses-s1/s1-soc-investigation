@@ -158,7 +158,7 @@ queries:
   notes: 'Which high-risk apps are installed on endpoints without an owner? | Source: oplockdown | Pivot if positive: Asset inventory, EDR endpoint.name, device owner lookup'
   pq: |-
     serverHost='{{src_oplockdown|oplockdown}}'
-    | filter owner == '-' OR owner == null OR owner == ''
+    | filter owner == '-' OR owner == '' OR !owner
     | group
         Endpoints=estimate_distinct(endpoint.name),
         FirstRecord.timestamp=min(timestamp),

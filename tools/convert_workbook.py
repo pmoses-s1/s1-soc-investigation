@@ -97,6 +97,9 @@ def normalize(s):
     s=re.sub(r"contains\s+'([^']*)'", r'contains:anycase("\1")', s)
     s=re.sub(r'contains\s+"([^"]*)"', r'contains:anycase("\1")', s)
     s=expand_any(s); s=param_datatables(s); s=param_serverhost(s)
+    # `field == null` is rejected by SDL (HTTP 500). The valid idiom for an
+    # empty/absent field is `!field`, so rewrite it defensively.
+    s=re.sub(r'([\w.]+)\s*==\s*null\b', r'!\1', s)
     return s
 
 def looks_like_query(pq):

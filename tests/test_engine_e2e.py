@@ -142,6 +142,29 @@ def test_abort_disabled_attempts_every_slice(tmp_path):
     led.close()
 
 
+def test_server_error_terminal_failure_aborts_query(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    cat = _broken_cat()
+    eng = _fast_engine(tmp_path, FakeTransport(fail_query_substr={"BROKEN": "server"}))
+    # max_attempts=1 + no subdivide -> a server error reaches terminal failure fast,
+    # which should trip the breaker and abort the query's remaining slices.
+    params = RunParams(case_id="C", entity="frank", lookback_days=15, slice_days=1,
+                       max_attempts=1, subdivide_on_timeout=False,
+                       abort_query_on_permanent=True)
+    eng.plan("run-se", cat, params, led)
+    result = eng.run("run-se", led, params)
+    broken_total = sum(result["coverage"]["per_query"]["broken"].values())
+    assert result["stats"]["failed"] >= 1        # at least one slice failed terminally
+    assert result["stats"]["aborted"] >= 1       # the breaker skipped the rest
+    assert result["stats"]["failed"] + result["stats"]["aborted"] == broken_total
+    v = verify_run(led, "run-se", cat)
+    assert {q.query_id: q.status for q in v.queries}["broken"] == "failed"
+    # No slice is left hanging (all terminal: some failed, the rest aborted).
+    tbs = result["coverage"]["totals_by_state"]
+    assert tbs.get("pending", 0) == 0 and tbs.get("in_flight", 0) == 0
+    led.close()
+
+
 def test_resume_retries_failed_slices_on_second_run(tmp_path):
     led = Ledger(tmp_path / "ledger.db")
     flaky = Query(id="flaky", title="Flaky",

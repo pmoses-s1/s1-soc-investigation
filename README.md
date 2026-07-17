@@ -105,13 +105,11 @@ Concretely, it lets you:
 classification (429 backs off, 5xx/timeout retries then subdivides, 400 syntax is permanent), and
 merge-aware reassembly (count/sum additive, min/max reduce, estimate_distinct flagged approximate).
 
-**Broken-query circuit breaker.** A permanent (rejected / 400-syntax) error is deterministic for the
-whole query, so once one slice is rejected the engine **auto-aborts that query's remaining slices**
-instead of re-failing it every day and burning the rate budget. The other queries keep running. The
-verification panel shows the exact rejection reason, so you can fix the query in the catalog editor
-(Edit, then Validate vs SDL) and start a new run for the same case: cached past days mean only the
-fixed query actually re-executes. The behaviour is on by default and can be toggled per run with **Stop
-query on permanent error**.
+**Broken-query circuit breaker.** A query that is deterministically broken should not re-fail on every
+day-slice. When a query is rejected outright (400 syntax) or keeps failing after retries and
+subdivision are exhausted (a 500 from a malformed query), the engine **auto-aborts that query's
+remaining slices** and flags it as needing a fix, instead of grinding through 90 days and burning the
+rate budget. Other queries keep running. See [Error handling and recovery](#error-handling-and-recovery).
 
 **Throughput.** The LRQ v2 async lifecycle (launch/poll/cancel with the forward tag), a per-token
 token-bucket rate governor (~2.5 rps under the 3 rps per-user cap), a worker pool that round-robins
@@ -149,6 +147,39 @@ PowerQuery that produced it at the top. The CSV/JSON results and `manifest.json`
 **Catalog management.** Edit, add to, import, and export the query catalog from the UI. Saved catalogs
 persist in the output volume. **Validate against SDL** launches each query over a short window to
 confirm the engine accepts it (catching syntax errors) before you run a 90-day investigation.
+
+## Error handling and recovery
+
+Each slice is executed independently, and its outcome is classified and handled on its own so one bad
+slice, or one bad query, never sinks the run:
+
+| Outcome | Classified as | What the engine does |
+|---|---|---|
+| **429** rate limit | throttle | Backs off, returns the slice to pending, and re-queues it. The AIMD controller lowers concurrency. Not counted against the retry budget. |
+| **5xx / timeout** | transient | Retries up to **Max attempts** (default 4) with exponential backoff, then **subdivides** the day into smaller windows and retries those. Genuine blips recover here. |
+| **400 syntax / rejected** | permanent | Never retried (it will always fail). The slice is marked permanent and the **circuit breaker** trips for that query. |
+| **Repeated 5xx** (retries **and** subdivision exhausted) | needs fix | Treated as a deterministic query error: the slice is marked failed and the **circuit breaker** trips, flagging the query as needing a fix. |
+
+**Circuit breaker.** Once a query trips the breaker (permanent rejection, or a repeated failure that
+survived retries and subdivision), the engine skips that query's remaining slices instead of re-failing
+each day. It is on by default; toggle it per run with **Stop query on permanent error**. The other
+queries in the catalog continue unaffected.
+
+**Seeing why.** The verification panel lists each query findings-first and, for a failed or incomplete
+query, shows the exact error the backend returned (for example, a rejected field or a malformed
+predicate). The activity log records every retry, subdivision, abort, and `needs fix` event with its
+reason, and is downloadable.
+
+**Fix and re-run.** When a query is flagged, fix it in the catalog editor (Edit, then **Validate vs
+SDL** to confirm it is accepted), then **start a new run for the same case**. Because past UTC days are
+immutable and content-addressed in the cache, every unchanged query is served from cache and only the
+fixed query actually re-executes against the backend, so the correction is cheap even over a 90-day
+window. (Plain **Resume** re-runs a run's still-pending slices with their original query text; use a new
+run to pick up an edited query.)
+
+**Output-folder permissions.** In Docker, the container makes the mounted `/data` folder writable for
+its runtime user automatically. If it still cannot write (for example a read-only mount), it prints a
+clear remediation message and exits instead of crashing with a stack trace.
 
 ## DFIR catalogs and variables
 
