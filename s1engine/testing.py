@@ -23,11 +23,13 @@ from typing import Any, Dict, List, Optional, Tuple
 class FakeTransport:
     def __init__(self, *, throttle_first_n: int = 0,
                  fail_query_substr: Optional[Dict[str, str]] = None,
+                 empty_query_substr: Optional[set] = None,
                  rows_per_slice: int = 3):
         self._lock = threading.Lock()
         self._queries: Dict[str, Dict[str, Any]] = {}
         self._throttle_budget = throttle_first_n
         self._fail = fail_query_substr or {}
+        self._empty = set(empty_query_substr or [])   # queries matching -> 0 rows
         self._rows = rows_per_slice
         self.launches = 0
         self.polls = 0
@@ -74,14 +76,17 @@ class FakeTransport:
             if q["polled"] < 2:
                 return 200, {"stepsCompleted": 0, "stepsTotal": 2, "data": None}, {}
             cols = ["event_day", "hits", "first_seen", "last_seen"]
+            empty = any(sub in q["pq"] for sub in self._empty)
             vals: List[List[Any]] = []
-            for i in range(self._rows):
-                vals.append([q["start"], 10 + i, q["start"], q["end"]])
+            if not empty:
+                for i in range(self._rows):
+                    vals.append([q["start"], 10 + i, q["start"], q["end"]])
+            match = 0 if empty else self._rows * 100
             return 200, {
                 "stepsCompleted": 2, "stepsTotal": 2, "cpuUsage": 12.5,
-                "matchCount": self._rows * 100,
+                "matchCount": match,
                 "data": {"columns": [{"name": c} for c in cols], "values": vals,
-                         "matchCount": self._rows * 100},
+                         "matchCount": match},
             }, {}
 
     # ----------------------------------------------------------- DELETE

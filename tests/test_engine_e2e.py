@@ -165,6 +165,32 @@ def test_server_error_terminal_failure_aborts_query(tmp_path):
     led.close()
 
 
+def test_query_source_detection():
+    from s1engine.engine import _query_source
+    assert _query_source("serverHost='okta' actor='x' | limit 1") == "okta"
+    assert _query_source("serverHost='zia' | group c=count()") == "zia"
+    assert _query_source("serverHost in ('a','b') | limit 1") is None   # multi-source
+    assert _query_source("event.type='Login' | limit 1") is None         # no serverHost
+
+
+def test_source_precheck_skips_empty_source_day(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    cat = Catalog(name="src", queries=[
+        Query(id="e1", title="Empty source", pq="serverHost='emptyco' {{entity}} | limit 5",
+              merge=MergeSpec(kind="rows"))])
+    eng = _fast_engine(tmp_path, FakeTransport(empty_query_substr={"serverHost='emptyco'"}))
+    params = RunParams(case_id="C", entity="x", lookback_days=3, slice_days=1,
+                       precheck_source_existence=True)
+    eng.plan("run-pc", cat, params, led)
+    result = eng.run("run-pc", led, params)
+    # Every slice was short-circuited as empty (probe found no data); none launched.
+    assert result["stats"]["skipped_empty"] >= 1
+    assert result["stats"]["done"] == 0
+    v = verify_run(led, "run-pc", cat)
+    assert {q.query_id: q.status for q in v.queries}["e1"] == "pass"   # empty-days are complete
+    led.close()
+
+
 def test_resume_retries_failed_slices_on_second_run(tmp_path):
     led = Ledger(tmp_path / "ledger.db")
     flaky = Query(id="flaky", title="Flaky",

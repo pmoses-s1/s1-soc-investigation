@@ -21,6 +21,7 @@ from __future__ import annotations
 import csv
 import json
 import queue
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -40,6 +41,20 @@ from .merge import merge_query_results
 from .rate_limiter import AIMDController, TokenBucket
 from .slicing import Slice, day_slices, iso_z, slices_for_lookback, subdivide
 from .workbook import build_workbook
+
+_SERVERHOST_RE = re.compile(r"serverHost\s*=\s*'([^']+)'")
+
+
+def _query_source(pq: str) -> Optional[str]:
+    """The single serverHost source a query is anchored to, or None.
+
+    Only returns a source for `serverHost='X'` equality with exactly one match, so
+    multi-source (`serverHost in (...)`) and source-agnostic queries are never
+    pre-checked (they may legitimately scan everything)."""
+    if re.search(r"serverHost\s+in\b", pq):
+        return None
+    m = _SERVERHOST_RE.findall(pq)
+    return m[0] if len(m) == 1 else None
 
 
 ProgressFn = Callable[[Dict[str, Any]], None]
@@ -61,6 +76,10 @@ class RunParams:
     # a syntax error is deterministic for the whole query, so skip its remaining
     # slices instead of re-failing every day and wasting the rate budget.
     abort_query_on_permanent: bool = True
+    # Source-existence pre-check: for a query anchored to one serverHost source,
+    # probe that source once per day and skip the query's slice as empty if the
+    # source has no data that day (instead of launching many empty-day queries).
+    precheck_source_existence: bool = True
 
 
 class InvestigationEngine:
@@ -198,11 +217,17 @@ class InvestigationEngine:
         outstanding = {"n": 0}
         out_lock = threading.Lock()
         stats = {"done": 0, "cached": 0, "failed": 0, "permanent": 0,
-                 "throttles": 0, "retries": 0, "subdivided": 0, "aborted": 0}
+                 "throttles": 0, "retries": 0, "subdivided": 0, "aborted": 0,
+                 "skipped_empty": 0}
         # Circuit breaker state: query_id -> the permanent error that tripped it.
         # Reset per run so a resume re-evaluates the query.
         self._broken: Dict[str, str] = {}
         self._broken_lock = threading.Lock()
+        # Source-existence cache for the day pre-check: (source, slice_key) -> bool,
+        # with per-key in-flight events so each (source, day) is probed only once.
+        self._src_exist: Dict[tuple, bool] = {}
+        self._src_inflight: Dict[tuple, threading.Event] = {}
+        self._src_lock = threading.Lock()
 
         def enqueue(job: Job) -> None:
             with out_lock:
@@ -295,6 +320,21 @@ class InvestigationEngine:
                             "rows": hit.get("row_count", len(hit["values"]))})
                 return
 
+        # Source-existence pre-check: if this query is anchored to a single serverHost
+        # source and that source has no data for this day, record an empty result
+        # instead of launching (one probe per source per day serves all its queries).
+        if params.precheck_source_existence and not self._cancel.is_set():
+            src = _query_source(job.pq)
+            if src is not None and not self._source_has_data(src, job, params):
+                ledger.mark_in_flight(job.job_id)
+                path = self._persist_slice(job, [], [], 0, 0, 0.0)
+                ledger.mark_done(job.job_id, result_path=str(path), match_count=0,
+                                 row_count=0, cpu_ms=0.0)
+                stats["skipped_empty"] += 1
+                self._emit({"event": "slice_skipped_empty", "query": job.query_id,
+                            "slice": job.slice_key, "source": src})
+                return
+
         client = self._next_client()
         with self.governor.slot():
             ledger.mark_in_flight(job.job_id)
@@ -357,6 +397,42 @@ class InvestigationEngine:
                               "elapsed_s": round(res.elapsed_s, 2),
                               "client": client.name,
                               "gov_limit": self.governor.limit})
+
+    def _source_has_data(self, source: str, job: Job, params: RunParams) -> bool:
+        """Whether `source` has any events in this day-slice. Probes SDL once per
+        (source, slice) and caches it; concurrent jobs for the same key wait on the
+        first probe. Fails open (returns True) on any error, so a probe problem never
+        drops real queries."""
+        key = (source, job.slice_key, job.scope)
+        with self._src_lock:
+            if key in self._src_exist:
+                return self._src_exist[key]
+            ev = self._src_inflight.get(key)
+            owner = ev is None
+            if owner:
+                ev = threading.Event()
+                self._src_inflight[key] = ev
+        if not owner:
+            ev.wait(timeout=90)
+            return self._src_exist.get(key, True)
+        has = True
+        try:
+            client = self._next_client()
+            with self.governor.slot():
+                res = client.run_pq(f"serverHost='{source}' | limit 1",
+                                    job.slice_start, job.slice_end,
+                                    tenant=self.config.tenant,
+                                    account_ids=self.config.account_ids or None,
+                                    priority=params.priority)
+            has = (res.row_count > 0) or (res.match_count > 0)
+        except Exception:  # noqa: BLE001 - fail open; never drop queries on a probe error
+            has = True
+        with self._src_lock:
+            self._src_exist[key] = has
+            ev.set()
+        if not has:
+            self._emit({"event": "source_empty", "source": source, "slice": job.slice_key})
+        return has
 
     def _handle_transient(self, job: Job, ledger: Ledger, params: RunParams,
                           stats: Dict[str, int], enqueue: Callable[[Job], None],
