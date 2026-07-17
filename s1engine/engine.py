@@ -253,6 +253,7 @@ class InvestigationEngine:
         self._src_exist: Dict[tuple, bool] = {}
         self._src_inflight: Dict[tuple, threading.Event] = {}
         self._warned_mismatch: set = set()
+        self._empty_emitted: set = set()   # (source, slice) already logged as empty-day
         self._src_lock = threading.Lock()
 
         def enqueue(job: Job) -> None:
@@ -365,6 +366,14 @@ class InvestigationEngine:
                         self._warn_field_mismatch(value, field, other_field)
                     else:
                         skip = True
+                        # Highlight once per (source, day) that the source is empty.
+                        k = (value, job.slice_key, job.scope)
+                        with self._src_lock:
+                            note = k not in self._empty_emitted
+                            self._empty_emitted.add(k)
+                        if note:
+                            self._emit({"event": "source_empty", "source": value,
+                                        "slice": job.slice_key})
                 if skip:
                     ledger.mark_in_flight(job.job_id)
                     path = self._persist_slice(job, [], [], 0, 0, 0.0)
