@@ -15,22 +15,24 @@ pivots). On import, queries were normalized for SDL (`== null` -> `!field`,
 ## Domain catalogs
 
 Pick the catalog for the phase you are working, or the master for everything the
-variables allow. Query counts are approximate and grow as the library is refreshed.
+variables allow. Query counts below are as of v0.4.1; the catalog dropdown in the UI shows the live count.
 
-| Catalog | Focus | What it covers |
-|---|---|---|
-| `dfir_coverage_identity` | Coverage & identity | Which sources hold data for the subject; first/last seen, countries, IPs; identity baselining. Run this first to see what telemetry exists before concluding absence. |
-| `dfir_identity_access` | Identity & access | Okta, Azure/Entra, JumpCloud, 1Password, secrets. Logins, MFA, lifecycle, privilege changes, impossible travel. |
-| `dfir_endpoint` | Endpoint / EDR | SentinelOne EDR plus software inventory (oplockdown): USB writes, archive/exfil tooling, large-file staging, logins, print/screenshot artifacts, installed software. |
-| `dfir_collab_storage` | Collaboration & storage | Google Workspace, Slack, OneDrive/Box: file downloads, sharing, deletions, channel joins, mass access. |
-| `dfir_web_network` | Web & network | Zscaler ZIA web proxy, DNS: destinations, uploads, blocked/allowed categories, DLP-relevant web activity. |
-| `dfir_saas_apps` | SaaS & apps | Salesforce (realtime/event/audit), GitHub, Snyk, Navan travel, misc SaaS: logins, report/SOQL volume, config changes, session pivots. |
-| `dfir_ai_prompt` | AI & Prompt Security | GenAI / Prompt Security (prompt-security): data-laundering and policy violations, secrets/sensitive content sent to AI tools, shadow-AI usage. |
-| `dfir_exfil_dlp` | Exfil & DLP | Cross-source exfiltration and data-loss signals (endpoint + web + SaaS staging and transfer). |
-| `dfir_cloud` | Cloud | Cloud control-plane activity (e.g. AWS). |
-| `dfir_correlation` | Cross-source correlation | Quick pivots and multi-source stitching (session keys, login keys, IOC sweeps). |
-| `dfir_insider_threat_full` | Master (full sweep) | Every domain query in one catalog, de-duplicated, for a one-click full investigation. |
-| `insider_threat` | Minimal example | A tiny 6-query sample for demos and smoke tests. |
+| Catalog | Queries | Focus | What it covers |
+|---|---:|---|---|
+| `dfir_coverage_identity` | 291 | Coverage & identity | Which sources hold data for the subject; first/last seen, countries, IPs; identity baselining. Run this first to see what telemetry exists before concluding absence. |
+| `dfir_identity_access` | 32 | Identity & access | Okta, Azure/Entra, JumpCloud, 1Password, secrets. Logins, MFA, lifecycle, privilege changes, impossible travel. |
+| `dfir_endpoint` | 22 | Endpoint / EDR | SentinelOne EDR plus software inventory (oplockdown): USB writes, archive/exfil tooling, large-file staging, logins, print/screenshot artifacts, installed software. |
+| `dfir_collab_storage` | 78 | Collaboration & storage | Google Workspace, Slack, OneDrive/Box: file downloads, sharing, deletions, channel joins, mass access. |
+| `dfir_web_network` | 52 | Web & network | Zscaler ZIA web proxy, DNS: destinations, uploads, blocked/allowed categories, DLP-relevant web activity. |
+| `dfir_saas_apps` | 37 | SaaS & apps | Salesforce (realtime/event/audit), GitHub, Snyk, Navan travel, misc SaaS: logins, report/SOQL volume, config changes, session pivots. |
+| `dfir_ai_prompt` | 65 | AI & Prompt Security | GenAI / Prompt Security (prompt-security): data-laundering and policy violations, secrets/sensitive content sent to AI tools, shadow-AI usage. |
+| `dfir_exfil_dlp` | 48 | Exfil & DLP | Cross-source exfiltration and data-loss signals (endpoint + web + SaaS staging and transfer). |
+| `dfir_cloud` | 3 | Cloud | Cloud control-plane activity (e.g. AWS). |
+| `dfir_correlation` | 15 | Cross-source correlation | Quick pivots and multi-source stitching (session keys, login keys, IOC sweeps). |
+| `dfir_insider_threat_full` | 640 | Master (full sweep) | Every domain query in one catalog, de-duplicated, for a one-click full investigation. |
+| `insider_threat` | 6 | Minimal example | A tiny sample for demos and smoke tests. |
+
+Domain catalogs total 643 queries; the master `dfir_insider_threat_full` is the de-duplicated union.
 
 ## How to run a case logically
 
