@@ -34,6 +34,8 @@ from .config import load_config
 from .engine import InvestigationEngine, RunParams
 from .export import zip_run
 from .ledger import Ledger
+from .lint import lint_catalog
+from .validate import validate_catalog
 from .verify import format_text, verify_run
 
 
@@ -174,6 +176,71 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Test harness: lint every query offline, then (unless --lint-only) launch each
+    against SDL over a short window with dummy vars to confirm it is accepted."""
+    if args.catalog:
+        paths = [Path(args.catalog)]
+    else:
+        d = Path(args.dir)
+        paths = sorted(list(d.glob("*.yaml")) + list(d.glob("*.yml")) + list(d.glob("*.json")))
+    if not paths:
+        raise SystemExit(f"no catalogs found (looked in {args.catalog or args.dir})")
+
+    config = None
+    transport = None
+    if not args.lint_only:
+        if args.mock:
+            from .testing import FakeTransport
+            transport = FakeTransport(fail_query_substr={"BROKEN": "syntax"})
+            config = load_config(require_credentials=False, console_url="https://mock.local",
+                                 tokens=["mock-tok-1"], rps=1000.0)
+        else:
+            overrides = {}
+            if args.console_url:
+                overrides["console_url"] = args.console_url
+            if args.rps:
+                overrides["rps"] = args.rps
+            config = load_config(**overrides)
+
+    lint_total = invalid_total = valid_total = unknown_total = 0
+    for path in paths:
+        try:
+            cat = load_catalog(path)
+        except Exception as e:  # noqa: BLE001
+            print(f"\n== {path} ==\n  PARSE ERROR: {e}")
+            invalid_total += 1
+            continue
+        print(f"\n== {path.name}  ({len(cat.enabled_queries())} queries) ==")
+        lint = lint_catalog(cat)
+        for qid, issues in lint.items():
+            for msg in issues:
+                print(f"  LINT  {qid}: {msg}")
+            lint_total += len(issues)
+        if args.lint_only:
+            continue
+        results = validate_catalog(config, cat, transport=transport,
+                                   window_hours=args.window_hours)
+        for r in results:
+            st = r.get("status")
+            if st == "valid":
+                valid_total += 1
+            elif st == "invalid":
+                invalid_total += 1
+                print(f"  INVALID {r['query_id']}: {r.get('error', '')}")
+            else:
+                unknown_total += 1
+                print(f"  UNKNOWN {r['query_id']}: {r.get('error', '')}")
+
+    print("\n=== validation summary ===")
+    print(f"lint issues : {lint_total}")
+    if not args.lint_only:
+        print(f"valid       : {valid_total}")
+        print(f"invalid     : {invalid_total}")
+        print(f"unknown     : {unknown_total} (transient / could not reach SDL)")
+    return 0 if (lint_total == 0 and invalid_total == 0) else 1
+
+
 def _safe(name: str) -> str:
     return "".join(c if c.isalnum() or c in "-_." else "_" for c in str(name))
 
@@ -214,6 +281,17 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--kind", default="results", choices=["logs", "results", "all"])
     e.add_argument("--out", default=None, help="output .zip path (default: cwd)")
     e.set_defaults(func=cmd_export)
+
+    v = sub.add_parser("validate", help="test harness: lint + validate catalog queries "
+                                        "(with dummy vars) against SDL")
+    v.add_argument("--catalog", default=None, help="a single catalog file (default: all in --dir)")
+    v.add_argument("--dir", default="catalogs", help="directory of catalogs to validate")
+    v.add_argument("--lint-only", action="store_true", help="static checks only, no tenant needed")
+    v.add_argument("--mock", action="store_true", help="validate against the offline fake backend")
+    v.add_argument("--window-hours", type=int, default=1, help="probe window per query (default 1h)")
+    v.add_argument("--console-url", default=None, help="override S1_CONSOLE_URL")
+    v.add_argument("--rps", type=float, default=None, help="per-token rate (default 2.5)")
+    v.set_defaults(func=cmd_validate)
     return p
 
 

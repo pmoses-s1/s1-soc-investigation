@@ -22,6 +22,7 @@ MODULES = [
     "tests.test_rate_limiter",
     "tests.test_engine_e2e",
     "tests.test_catalog_defaults",
+    "tests.test_catalog_lint",
 ]
 
 
