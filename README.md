@@ -60,6 +60,45 @@ finish or die. That decomposition is what makes long lookbacks tractable:
 - A past UTC day's result never changes, so it is cached and reused across runs and investigations;
   only the volatile current day re-runs.
 
+## What you can achieve
+
+The point of the tool is a completed, provable investigation over a window too long to run by hand.
+Concretely, it lets you:
+
+- **Reconstruct long-lookback activity for a subject.** Run a full DFIR / insider-threat catalog across
+  identity, endpoint, web, cloud, SaaS, and exfil sources over 90+ days (or a fixed window like all of
+  April) in a single pass, instead of babysitting queries that time out on wide ranges.
+- **Scope an incident and go straight to the findings.** The verification panel sorts queries with hits
+  to the top with row counts, so you see which of a large catalog actually matched for this entity, host,
+  IP, or session, and can click through to preview the rows.
+- **Prove completeness for audit or handoff.** The per-query, per-day verification report and the durable
+  ledger show every slice reached a terminal state, so you can demonstrate nothing was silently dropped.
+- **Triage many subjects at once.** Batch mode runs the same catalog across a CSV of users and rolls up
+  per-user status and hit counts, so you can compare who warrants a closer look.
+- **Standardise and reuse a hunt.** A versioned catalog plus template variables makes the same
+  investigation repeatable for any subject, refreshable from the repo without rebuilding the image.
+- **Walk away with evidence.** Every run yields an `.xlsx` workbook (one tab per query, each showing its
+  PowerQuery), the raw per-day slice JSON, merged CSV/JSON per query, a manifest, and a downloadable
+  activity log, all under one case folder.
+
+## How it works, end to end
+
+1. **Plan.** The chosen catalog is expanded against the lookback or From/To window into one job per query
+   per day-slice. Queries whose required variables are unset are skipped up front, and the cost preview
+   shows the resulting job count before you commit.
+2. **Execute.** Jobs run through the LRQ v2 async lifecycle (launch, poll, cancel) across a worker pool
+   that round-robins your service-user tokens, paced by a per-token rate governor and an AIMD controller
+   that tunes concurrency to what the backend tolerates.
+3. **Adapt.** Rate limits back off, timeouts and 5xx retry and then subdivide the day into smaller
+   windows, and query-syntax errors are marked permanent. Every state change is recorded in the SQLite
+   ledger, which is also the resume source of truth.
+4. **Cache.** Immutable past-day results are content-addressed and reused, so a re-run or an overlapping
+   second investigation executes only the new or changed days.
+5. **Merge.** Per-day results are reassembled into one result per query (count/sum additive, min/max
+   reduce, `estimate_distinct` flagged approximate).
+6. **Verify and export.** Coverage is checked per query per day, the verdict is presented findings-first
+   in the UI, and the run is written out as the workbook, CSV/JSON results, manifest, and activity log.
+
 ## What it does
 
 **Resilient execution.** UTC day-slicing, a durable SQLite job ledger with resume, retry with error
