@@ -24,6 +24,10 @@ def _catalog(extra=None):
 
 
 def _config(**over):
+    # High rps so the rate limiter is not a timing factor (the source pre-check adds
+    # probe queries; throttle behavior is exercised via FakeTransport, not the rps).
+    over.setdefault("rps", 10000.0)
+    over.setdefault("burst", 10000)
     return load_config(require_credentials=False, console_url="https://mock",
                        tokens=["t1", "t2"], poll_interval_s=0.01,
                        query_timeout_s=5.0, **over)
@@ -58,7 +62,8 @@ def test_full_run_passes_and_logs_activity(tmp_path):
 def test_throttles_are_absorbed(tmp_path):
     led = Ledger(tmp_path / "ledger.db")
     eng = _engine(tmp_path, FakeTransport(throttle_first_n=4))
-    params = RunParams(case_id="C", entity="bob", lookback_days=2, slice_days=1)
+    params = RunParams(case_id="C", entity="bob", lookback_days=2, slice_days=1,
+                       precheck_source_existence=False)
     eng.plan("run-t", _catalog(), params, led)
     result = eng.run("run-t", led, params)
     eng.finalize("run-t", led, _catalog(), params)
@@ -167,10 +172,28 @@ def test_server_error_terminal_failure_aborts_query(tmp_path):
 
 def test_query_source_detection():
     from s1engine.engine import _query_source
-    assert _query_source("serverHost='okta' actor='x' | limit 1") == "okta"
-    assert _query_source("serverHost='zia' | group c=count()") == "zia"
-    assert _query_source("serverHost in ('a','b') | limit 1") is None   # multi-source
-    assert _query_source("event.type='Login' | limit 1") is None         # no serverHost
+    assert _query_source("serverHost='okta' actor='x' | limit 1") == ("serverHost", "okta")
+    assert _query_source("dataSource.name='zia' | group c=count()") == ("dataSource.name", "zia")
+    assert _query_source("serverHost in ('a','b') | limit 1") is None    # multi-source
+    assert _query_source("event.type='Login' | limit 1") is None          # no anchor
+    assert _query_source("serverHost='a' dataSource.name='b' | limit 1") is None  # ambiguous
+
+
+def test_apply_source_field_swap():
+    from s1engine.engine import _apply_source_field
+    # swap serverHost -> dataSource.name (anchor only)
+    assert _apply_source_field("serverHost='okta' | limit 1", "dataSource.name") == \
+        "dataSource.name='okta' | limit 1"
+    # swap dataSource.name -> serverHost
+    assert _apply_source_field("dataSource.name='okta' | limit 1", "serverHost") == \
+        "serverHost='okta' | limit 1"
+    # None leaves it untouched
+    assert _apply_source_field("serverHost='okta' | limit 1", None) == "serverHost='okta' | limit 1"
+    # in-list form is swapped; a group-by projection on the field is NOT touched
+    assert _apply_source_field("serverHost in ('a','b') | limit 1", "dataSource.name") == \
+        "dataSource.name in ('a','b') | limit 1"
+    assert _apply_source_field("serverHost='okta' | group c=count() by dataSource.name", "serverHost") == \
+        "serverHost='okta' | group c=count() by dataSource.name"
 
 
 def test_source_precheck_skips_empty_source_day(tmp_path):
@@ -178,16 +201,38 @@ def test_source_precheck_skips_empty_source_day(tmp_path):
     cat = Catalog(name="src", queries=[
         Query(id="e1", title="Empty source", pq="serverHost='emptyco' {{entity}} | limit 5",
               merge=MergeSpec(kind="rows"))])
-    eng = _fast_engine(tmp_path, FakeTransport(empty_query_substr={"serverHost='emptyco'"}))
+    # 'emptyco' matches both serverHost='emptyco' and dataSource.name='emptyco' probes.
+    eng = _fast_engine(tmp_path, FakeTransport(empty_query_substr={"'emptyco'"}))
     params = RunParams(case_id="C", entity="x", lookback_days=3, slice_days=1,
                        precheck_source_existence=True)
     eng.plan("run-pc", cat, params, led)
     result = eng.run("run-pc", led, params)
-    # Every slice was short-circuited as empty (probe found no data); none launched.
     assert result["stats"]["skipped_empty"] >= 1
     assert result["stats"]["done"] == 0
     v = verify_run(led, "run-pc", cat)
-    assert {q.query_id: q.status for q in v.queries}["e1"] == "pass"   # empty-days are complete
+    assert {q.query_id: q.status for q in v.queries}["e1"] == "pass"
+    led.close()
+
+
+def test_source_field_mismatch_warns(tmp_path):
+    events = []
+    cfg = load_config(require_credentials=False, console_url="https://mock", tokens=["t1", "t2"],
+                      poll_interval_s=0.001, query_timeout_s=5.0, rps=10000.0, burst=10000)
+    # serverHost='mismatchco' probe is empty, but dataSource.name='mismatchco' has data.
+    eng = InvestigationEngine(cfg, output_root=tmp_path,
+                              transport=FakeTransport(empty_query_substr={"serverHost='mismatchco'"}),
+                              pool_size=4, on_progress=lambda e: events.append(e))
+    cat = Catalog(name="mm", queries=[
+        Query(id="m1", title="Mismatch", pq="serverHost='mismatchco' {{entity}} | limit 5",
+              merge=MergeSpec(kind="rows"))])
+    params = RunParams(case_id="C", entity="x", lookback_days=2, slice_days=1,
+                       precheck_source_existence=True)
+    led = Ledger(tmp_path / "ledger.db")
+    eng.plan("run-mm", cat, params, led)
+    result = eng.run("run-mm", led, params)
+    assert result["stats"]["skipped_empty"] >= 1
+    assert any(e.get("event") == "source_field_mismatch" and e.get("other_field") == "dataSource.name"
+               for e in events)
     led.close()
 
 

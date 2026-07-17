@@ -314,7 +314,8 @@ def start_run(d: dict) -> dict:
         priority=d.get("priority", "LOW"), variables=d.get("vars") or {},
         start_date=(d.get("startDate") or None), end_date=(d.get("endDate") or None),
         abort_query_on_permanent=bool(d.get("abortOnPermanent", True)),
-        precheck_source_existence=bool(d.get("precheckSource", True)))
+        precheck_source_existence=bool(d.get("precheckSource", True)),
+        source_field=(d.get("sourceField") or None))
 
     started_at = datetime.now(timezone.utc).isoformat()
     # Persist run metadata so the run can be resumed or reopened later (survives restart).
