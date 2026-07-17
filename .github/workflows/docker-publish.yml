@@ -45,7 +45,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           provenance: false
           build-args: |
-            S1IE_VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('0.3.0+{0}', github.sha) }}
+            S1IE_VERSION=${{ github.ref_type == 'tag' && github.ref_name || format('0.4.0+{0}', github.sha) }}
             S1IE_BUILD_DATE=${{ github.event.repository.updated_at }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
