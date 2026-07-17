@@ -183,11 +183,15 @@ clear remediation message and exits instead of crashing with a stack trace.
 
 ## DFIR catalogs and variables
 
-The bundled `catalogs/` include a DFIR insider-threat set converted from a real investigation
-workbook: eight domain catalogs (`dfir_identity_access`, `dfir_endpoint`, `dfir_collab_storage`,
-`dfir_web_network`, `dfir_cloud`, `dfir_saas_apps`, `dfir_exfil_dlp`, `dfir_correlation`) plus a
-master `dfir_insider_threat_full` for a one-click full sweep. Pick a domain catalog per phase, or the
-master to run everything the provided variables allow.
+The bundled `catalogs/` are a DFIR / insider-threat query library (~1,300 queries) organized by
+investigation domain: identity & coverage, endpoint, collaboration & storage, web & DLP, SaaS, AI /
+Prompt Security, cloud, exfil, and cross-source correlation, plus a master `dfir_insider_threat_full`
+for a one-click full sweep. Pick a domain catalog per phase, or the master. The
+[catalog guide](docs/catalog-guide.md) documents each catalog and a logical run order; recent changes
+are in the [changelog](CHANGELOG.md).
+
+Validate the library with the built-in test harness: `python -m s1engine.cli validate --lint-only`
+(offline) or `python -m s1engine.cli validate` (launches each query with dummy variables against SDL).
 
 Every environment- or subject-specific value in a query is a template variable, not a hardcoded string.
 The **Variables** popup groups them:
