@@ -161,7 +161,7 @@
 
       <div id="batchWrap" style="display:none">
         <label>Users CSV <span class="help" data-tip="One CSV for the whole batch. First row = column headers; each following row is one user and their variables. Columns: email (required), hostname, agent_uuid, ip, username, sf_user_id, session. Datatables are the same for everyone and are set globally in Variables, not per row.">?</span></label>
-        <div class="hint">One CSV, first row = headers. Columns are the same variables as single mode: <b>email</b> (required), hostname, agent_uuid, ip, username, sf_user_id, session. Each row is one user. Datatables are global (set in Variables), not per row.</div>
+        <div class="hint" id="batchHelp">One CSV, first row = headers. Columns are the same variables as single mode: <b>email</b> (required), plus the subject variables. Each row is one user. Datatables are global (set in Variables), not per row.</div>
         <textarea id="userList" placeholder="email,hostname,agent_uuid,ip,username,sf_user_id,session&#10;jane.smith@corp.com,LT-JANE,,10.0.0.5,jsmith,,&#10;john.doe@corp.com,LT-JOHN,,,jdoe,," style="min-height:80px"></textarea>
         <div class="btnrow">
           <button class="ghost sm" id="btnUploadUsers">Upload CSV</button>
@@ -443,7 +443,7 @@ async function loadConfig(){
   setConn(c.creds_ok,c.console_url,c.num_tokens);
   if(c.console_url&&!$("console").value)$("console").value=c.console_url;
   DTS=c.datatables||[]; SUBJECT_VARS=c.subject_vars||[]; SRCS=c.source_vars||[];
-  renderVarFields();
+  renderVarFields(); updateBatchHints();
   renderVarsSummary(); updateCatVars();
 }
 function setConn(ok,url,n){
@@ -749,10 +749,19 @@ $("modeSingle").onclick=()=>setMode("single");
 $("modeBatch").onclick=()=>setMode("batch");
 
 function splitCsv(line){ return line.split(",").map(s=>s.trim().replace(/^"|"$/g,"")); }
+// Header aliases per subject variable. Any variable not listed is still matched by
+// its own name, so batch mode always covers the full single-mode variable set.
 const COLMAP={hostname:["hostname","host","device","devicehostname","endpoint","endpoint.name","computer"],
   agent_uuid:["agent_uuid","agentuuid","agent.uuid","uuid"],ip:["ip","ipaddress","ip_address"],
   username:["username","login","samaccountname","user_name"],
-  sf_user_id:["sf_user_id","salesforce_user_id","sfuserid"],session:["session"]};
+  sf_user_id:["sf_user_id","salesforce_user_id","sfuserid"],session:["session","session_key"],
+  app_name:["app_name","app","application","tool","software"],
+  domain:["domain","host_substring","url_substring"],
+  login_key:["login_key","loginkey"],
+  file_or_title:["file_or_title","file","filename","doc_title","title"]};
+// The batch CSV columns = every single-mode subject variable (from the server), so
+// the two modes never drift. Falls back to COLMAP keys if config hasn't loaded.
+function batchVars(){ return (SUBJECT_VARS && SUBJECT_VARS.length) ? SUBJECT_VARS.map(s=>s.var) : Object.keys(COLMAP); }
 function parseSubjects(){
   const text=$("userList").value.trim(); SUBJECTS=[];
   if(!text){renderSubjects();return;}
@@ -764,8 +773,9 @@ function parseSubjects(){
       const cols=splitCsv(line);
       const ent=(eIdx>=0?cols[eIdx]:cols[0])||""; if(!ent)continue;
       const vars={};
-      for(const [v,alts] of Object.entries(COLMAP)){
-        const idx=headers.findIndex(h=>alts.includes(h));
+      for(const v of batchVars()){
+        const alts=COLMAP[v]||[v];
+        const idx=headers.findIndex(h=>alts.includes(h)||h===v);
         if(idx>=0 && cols[idx]) vars[v]=cols[idx];
       }
       SUBJECTS.push({entity:ent,vars});
@@ -776,12 +786,20 @@ function parseSubjects(){
 function renderSubjects(){
   $("subjectsHint").textContent = SUBJECTS.length?`${SUBJECTS.length} user${SUBJECTS.length==1?"":"s"} loaded`:"";
   if(!SUBJECTS.length){$("subjectsPreview").innerHTML="";return;}
-  const cols=["entity","hostname","agent_uuid","ip","username"];
+  // Show entity plus only the variables that at least one row actually populated.
+  const used=batchVars().filter(v=>SUBJECTS.some(s=>s.vars[v]));
+  const cols=["entity",...used];
   $("subjectsPreview").innerHTML='<table><thead><tr>'+cols.map(c=>`<th>${c}</th>`).join('')+'</tr></thead><tbody>'+
     SUBJECTS.slice(0,100).map(s=>'<tr>'+cols.map(c=>`<td class="kv">${c==="entity"?s.entity:(s.vars[c]||"")}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
 }
+function updateBatchHints(){
+  const vars=batchVars();
+  $("batchHelp").innerHTML=`One CSV, first row = headers. Columns are the same variables as single mode: <b>email</b> (required), ${vars.join(", ")}. Each row is one user. Datatables are global (set in Variables), not per row.`;
+  $("userList").placeholder="email,"+vars.join(",")+"\njane.smith@corp.com"+",".repeat(vars.length)+"\njohn.doe@corp.com"+",".repeat(vars.length);
+}
 $("btnTemplate").onclick=()=>{
-  const csv="email,hostname,agent_uuid,ip,username,sf_user_id,session\njane.smith@corp.com,LT-JANE,,10.0.0.5,jsmith,,\njohn.doe@corp.com,LT-JOHN,,,jdoe,,\n";
+  const cols=["email",...batchVars()];
+  const csv=cols.join(",")+"\njane.smith@corp.com"+",".repeat(cols.length-1)+"\njohn.doe@corp.com"+",".repeat(cols.length-1)+"\n";
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
   a.download="batch_users_template.csv"; a.click();
 };
