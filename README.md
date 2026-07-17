@@ -99,6 +99,30 @@ Concretely, it lets you:
 6. **Verify and export.** Coverage is checked per query per day, the verdict is presented findings-first
    in the UI, and the run is written out as the workbook, CSV/JSON results, manifest, and activity log.
 
+## Feature summary
+
+At a glance (details below):
+
+- **Reliable long lookbacks.** Day-slicing, durable ledger with resume, retry/subdivide, merge-aware
+  reassembly, and a content-addressed cache so re-runs execute only new or changed days.
+- **Self-healing execution.** Broken-query circuit breaker (aborts a query that keeps failing), and a
+  per-day source-existence pre-check that skips a source's queries on days it has no data.
+- **Source-field aware.** Probes both `serverHost` and `dataSource.name`, warns on a field mismatch, and
+  can force every query to either field.
+- **Throughput.** LRQ v2 async lifecycle, multi-token round-robin, AIMD auto-tuning, auto-sized pool.
+- **Live progress + verification.** Progress bar, ETA, in-parallel count, and a findings-first report
+  that proves every slice ran, with inline result preview and per-query error.
+- **Inline fix loop.** Edit a failed query, test it against SDL, save it, and re-run, all from the UI.
+- **Single and batch.** One entity or a CSV of users; rolling lookback or a fixed date window.
+- **Plan and control.** Cost preview, Test connection, Recent runs + resume, query subset with
+  search / select-all.
+- **Variables.** Subject inputs, config datatables, and overridable source names, with import/export.
+- **Catalogs + harness.** ~1,300 DFIR queries across domains, plus a linter and a `validate` command
+  that checks queries (with dummy vars) before a long run.
+- **Exports.** Per-case `.xlsx` workbook, plus CSV/JSON/manifest and downloadable logs.
+- **Hardened Docker.** Loopback by default, optional token auth, non-root runtime, auto-fixed volume
+  permissions, one-command install.
+
 ## What it does
 
 **Resilient execution.** UTC day-slicing, a durable SQLite job ledger with resume, retry with error
@@ -118,6 +142,13 @@ on success, self-tuning to whatever the backend tolerates. The UI auto-sizes the
 tokens x 3 as you add tokens, and shows the resulting aggregate rate; type a pool value to override, or
 clear it to auto-size again.
 
+**Source-existence pre-check.** For a query anchored to a single source, the engine probes that source
+once per day (lazily, one cached probe shared across all its queries) and skips the query's slice as
+empty if the source has no data that day, a large saving on quiet sources with many queries. It checks
+both `serverHost` and `dataSource.name`, warns when a source's data lives under the other field than the
+query uses, and a **Source field** control can force every query to `serverHost` or `dataSource.name`.
+Toggle: **Skip empty source-days**. The audit log highlights a per-day **NO DATA** line.
+
 **Content-addressed cache.** Immutable past-day slices are keyed by hash(query + window + scope) and
 reused across runs, so re-running an investigation, or a second overlapping one, executes only the new
 or changed days.
@@ -126,8 +157,13 @@ or changed days.
 with a running throughput and time-to-finish estimate, and live tiles show done / cached / failed /
 throttled / retried counts as they change. Every event is written to `activity.jsonl` as it happens;
 after each run a verification report confirms every slice of every query completed and is presented in
-the UI, findings first (queries with hits sorted to the top). Click any query to preview its merged
-results inline. Download the raw activity log, or a zip of the results, from the UI or the API.
+the UI, findings first (queries with hits sorted to the top), each failed query showing the exact
+backend error. Click any query to preview its merged results inline. Download the raw activity log, or a
+zip of the results, from the UI or the API.
+
+**Inline fix loop.** Open a failed query to edit its template in place, **Test vs SDL** over a short
+window to confirm it is accepted, **Save to catalog**, and **Save & re-run** a fresh run for the same
+case, without leaving the results panel. Cached past days mean only the fixed query re-executes.
 
 **Single and batch investigations.** Run one entity, or a batch from a single CSV whose columns are the
 same variables as single mode (email plus hostname, agent_uuid, ip, username, sf_user_id, session), one
@@ -138,7 +174,17 @@ a rolling lookback (e.g. last 90 days) or a fixed date window (e.g. all of April
 skipped-query count) as you change the catalog, query subset, lookback, dates, or variables. A **Test
 connection** button confirms the token authenticates before you start a long run. **Recent runs** lists
 past investigations (surviving restarts) and reopens any of them; an incomplete or cancelled run can be
-resumed from where it stopped.
+resumed from where it stopped. **Select queries** runs a subset of the catalog with a search filter and
+select-all.
+
+**Variables.** Subject inputs (`{{hostname}}`, `{{ip}}`, `{{app_name}}`, and so on), optional config
+datatables, and overridable data-source names are set in one popup; a query whose required variables are
+unset is skipped, not failed. **Import / Export variables** saves the whole set to JSON to reuse across
+cases or share with a teammate.
+
+**Query test harness.** A static linter and `python -m s1engine.cli validate` check the catalog for the
+syntax pitfalls SDL rejects and (optionally) launch each query with dummy variables against SDL, so a
+bad query is caught before a 90-day run. A pytest fails the build if any bundled catalog regresses.
 
 **Workbook export.** Each run produces a per-case `.xlsx`: a Summary sheet with the verification verdict
 and coverage, then one sheet per query with its merged results. Each query tab shows the exact
