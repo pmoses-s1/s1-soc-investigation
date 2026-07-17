@@ -3,11 +3,14 @@
 > **Disclaimer.** Community-supported tool, not an official SentinelOne product and not covered by
 > SentinelOne support. Review what it runs and test against a non-production tenant first.
 
-An execution engine for running a standard forensic / insider-threat query catalog across long
-(90+ day) lookbacks over the SentinelOne Singularity Data Lake, without the timeouts, rate limits,
-and silently-skipped queries that break notebook automation. It runs as a local, hardened Docker web
-app: pick a catalog, an entity, and a lookback, hit Start, watch every query complete slice by slice,
-and get a verification report that proves nothing was skipped, plus a workbook and downloadable logs.
+An execution engine and query library for long (90+ day) DFIR and insider-threat investigations over the
+SentinelOne Singularity Data Lake, without the timeouts, rate limits, and silently-skipped queries that
+break notebook automation. It ships ~1,300 curated DFIR queries across identity, endpoint, web/DLP,
+SaaS, AI, cloud, and cross-source correlation, and runs them slice by slice as a local, hardened Docker
+web app: pick a catalog, an entity, and a lookback, hit Start, and get a findings-first verification
+report that proves every query ran, plus a workbook and downloadable logs. It is self-healing along the
+way, skipping days a source has no data, aborting broken queries instead of re-failing them, and letting
+you fix a query and re-run from the results panel.
 
 ## Install and run (Docker, one command)
 
