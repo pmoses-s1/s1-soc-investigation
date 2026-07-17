@@ -106,11 +106,21 @@ Then set the window and options:
 - **Output folder** (blank uses the mounted `/data`), **Worker pool** and **Max attempts**. The pool
   auto-sizes to tokens x 3 as you add tokens and shows the resulting aggregate rate; type a value to
   override or clear it to auto-size again.
+- **Source field.** Which field the catalog's queries use to pin a data source. "As written" keeps each
+  query as-is; **Force serverHost** or **Force dataSource.name** rewrites every source-anchor predicate
+  to that field (some tenants populate one, some the other).
+
+  ![Source field selector](images/10-source-field.png)
+
 - **Priority**, **Adaptive sub-slice** (split a slow slice and retry the pieces), **Use cache** (reuse
-  immutable past-day results), **Stop query on permanent error** (the circuit breaker, see Tips), and
-  **Dry run (offline mock)** to try the flow with no tenant.
-- **Select queries** runs only a subset of the catalog. The cost preview beside it estimates the job
-  count (runnable queries x slices) before you commit.
+  immutable past-day results), **Stop query on permanent error** (the circuit breaker, see Tips),
+  **Skip empty source-days** (probe a source once per day and skip its queries if it has no data that
+  day), and **Dry run (offline mock)** to try the flow with no tenant.
+- **Select queries** runs only a subset of the catalog. Search by id or title and use **Select all** to
+  toggle the (filtered) list; the count updates live. The cost preview beside the button estimates the
+  job count (runnable queries x slices, with a skipped count) before you commit.
+
+  ![Select queries](images/09-select-queries.png)
 
 Click **Start investigation** (or **Start batch investigation**).
 
@@ -125,8 +135,10 @@ remaining. The tiles below it show **done**, **running** (queries executing in p
 **pending**, **cached**, **failed**, **throttled**, and **retried** counts as they change. The
 **Activity log** streams every event: the plan, each slice completing (row count, elapsed time, which
 token ran it, and the current concurrency limit `gov=`), cache hits, retries, sub-slicing, throttles,
-and any aborts. The full trace is also written to `activity.jsonl` in the run folder. You can **Cancel**
-a run at any time; it stops after in-flight slices finish and stays resumable.
+and any aborts. When a source has no data for a day, a highlighted **NO DATA** line is logged once and
+that source's queries for the day are skipped. The full trace is also written to `activity.jsonl` in
+the run folder. You can **Cancel** a run at any time; it stops after in-flight slices finish and stays
+resumable.
 
 ---
 
@@ -149,6 +161,13 @@ workbook, manifest, logs), and **Everything (.zip)** (the above plus raw per-sli
 incomplete or cancelled, a **Resume** button re-runs its outstanding slices. Each run also writes a
 per-case `.xlsx` workbook (a Summary sheet plus one tab per query showing its PowerQuery). All outputs
 land under `<output>/<case>/<run_id>/`; see the [output layout](../README.md#output-layout).
+
+![Fix a failed query inline](images/11-fix-query.png)
+
+**Fix a failed query in place.** Opening a failed query shows its editable template under **Edit / fix
+this query**. Adjust it, **Test vs SDL** over a short window to confirm SDL accepts it, **Save to
+catalog**, and **Save & re-run investigation** to start a fresh run for the same case using the fix.
+Because past days are cached, only the fixed query actually re-executes.
 
 ---
 
