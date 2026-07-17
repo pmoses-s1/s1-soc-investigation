@@ -28,7 +28,7 @@ queries:
   title: Session -> Timeline
   notes: 'Reconstruct a web/app session using known session keys. | Source: Okta, Salesforce, Slack, Box'
   pq: |-
-    session='{{session}}' OR authenticationContext.externalSessionId='{{session}}' OR detail.payload.SessionKey='{{session}}' OR SESSION_KEY='{{session}}' OR detail.payload.LoginKey='<LOGIN_KEY>' OR LOGIN_KEY='<LOGIN_KEY>'
+    session='{{session}}' OR authenticationContext.externalSessionId='{{session}}' OR detail.payload.SessionKey='{{session}}' OR SESSION_KEY='{{session}}' OR detail.payload.LoginKey='{{login_key}}' OR LOGIN_KEY='{{login_key}}'
     | columns timestamp, serverHost, actor.email, detail.payload.Username, event.name, event.type, action, detail-type, ipAddress, detail.payload.SourceIp, CLIENT_IP
     | sort timestamp
     | limit 10000
@@ -36,8 +36,8 @@ queries:
   title: Domain / URL -> Egress
   notes: 'Review web activity to personal cloud/AI/paste sites. | Source: ZIA'
   pq: |-
-    serverHost='zia'
-    | filter event.hostname contains:anycase('<DOMAIN>') OR event.url contains:anycase('<DOMAIN>')
+    serverHost='{{src_zia|zia}}'
+    | filter event.hostname contains:anycase('{{domain}}') OR event.url contains:anycase('{{domain}}')
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
     | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,event.requestmethod,outB,event.ClientIP,event.useragent
     | sort -timestamp
@@ -46,7 +46,7 @@ queries:
   title: File Name -> Activity
   notes: 'Find downloads/uploads/shares for a filename/title. | Source: Google WS, Slack, Box, EDR'
   pq: |-
-    message contains:anycase('<FILE_OR_TITLE>') OR event.doc_title contains:anycase('<FILE_OR_TITLE>') OR entity.file.name contains:anycase('<FILE_OR_TITLE>') OR tgt.file.path contains:anycase('<FILE_OR_TITLE>')
+    message contains:anycase('{{file_or_title}}') OR event.doc_title contains:anycase('{{file_or_title}}') OR entity.file.name contains:anycase('{{file_or_title}}') OR tgt.file.path contains:anycase('{{file_or_title}}')
     | columns timestamp, serverHost, actor.email, user, event.name, action, event.doc_title, entity.file.name, tgt.file.path, ipAddress
     | sort -timestamp
     | limit 5000
@@ -54,7 +54,7 @@ queries:
   title: Salesforce UserId -> Activity
   notes: 'Salesforce often needs UserId instead of email. | Source: salesforce_event'
   pq: |-
-    serverHost='salesforce_event'
+    serverHost='{{src_salesforce_event|salesforce_event}}'
     | filter USER_ID='{{sf_user_id}}' OR USER_ID_DERIVED='{{sf_user_id}}' OR username contains:anycase('{{username}}')
     | let ts=(TIMESTAMP_DERIVED || TIMESTAMP || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=EVENT_TYPE, UserId=USER_ID, DerivedUser=USER_ID_DERIVED, ClientIP=CLIENT_IP, ClientName=CLIENT_NAME, ConnectedApp=CONNECTED_APP_ID, Method=HTTP_METHOD, Entity=ENTITY_NAME, URI=URI, Query=QUERY, Status=REQUEST_STATUS, LoginKey=LOGIN_KEY, SessionKey=SESSION_KEY, UserAgent=USER_AGENT
@@ -65,7 +65,7 @@ queries:
   notes: 'Tie login to report/query/file activity. | Source: salesforce-realtime, salesforce_event'
   pq: |-
     serverHost in ('salesforce-realtime','salesforce_event')
-    | filter detail.payload.LoginKey='%LOGIN_KEY%' OR detail.payload.SessionKey='%SESSION_KEY%' OR LOGIN_KEY='%LOGIN_KEY%' OR SESSION_KEY='%SESSION_KEY%'
+    | filter detail.payload.LoginKey='{{login_key}}' OR detail.payload.SessionKey='{{session}}' OR LOGIN_KEY='{{login_key}}' OR SESSION_KEY='{{session}}'
     | let ts=(detail.payload.EventDate || TIMESTAMP_DERIVED || time || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, DetailType=detail-type, EventType=EVENT_TYPE, Username=detail.payload.Username, UserId=detail.payload.UserId, Operation=detail.payload.Operation, EventName=detail.payload.Name, Entity=ENTITY_NAME, URI=URI, IP=detail.payload.SourceIp, ClientIP=CLIENT_IP, Query=detail.payload.Query
     | sort Time
@@ -85,7 +85,7 @@ queries:
   title: Slack File Activity
   notes: 'Downloads/uploads/shares by a user. | Source: slack'
   pq: |-
-    serverHost='slack' actor.user.email contains:anycase '{{entity}}'
+    serverHost='{{src_slack|slack}}' actor.user.email contains:anycase '{{entity}}'
       action in ('file_downloaded','file_uploaded','file_shared','file_public_link_created')
     | columns timestamp, action, actor.user.email, entity.file.name, entity.file.filetype, entity.channel.name, context.ip_address, context.ua
     | sort -timestamp
@@ -94,7 +94,7 @@ queries:
   title: ZIA Large Uploads
   notes: 'Find large outbound web uploads. | Source: zia'
   pq: |-
-    serverHost='zia'
+    serverHost='{{src_zia|zia}}'
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
     | filter outB > 50000000
     | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,event.requestmethod,outB,event.ClientIP,event.useragent
@@ -104,7 +104,7 @@ queries:
   title: AI / Unsanctioned App Usage
   notes: 'Find high-volume AI app usage or upload volume. | Source: zia, prompt-security, anthropic-activity'
   pq: |-
-    serverHost='zia'
+    serverHost='{{src_zia|zia}}'
     | filter event.urlcategory contains:anycase('AI','ML') OR event.appname contains:anycase('AI','Claude','ChatGPT','Gemini','Perplexity','Copilot')
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
     | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname,event.action
@@ -113,7 +113,7 @@ queries:
   title: Query Cost Telemetry
   notes: 'Review query cost and columns faulted for heavy searches. | Source: scalyr-metalog'
   pq: |-
-    serverHost='scalyr-metalog' tag = 'QueryExecutive.query' user='{{entity}}'
+    serverHost='{{src_scalyr_metalog|scalyr-metalog}}' tag = 'QueryExecutive.query' user='{{entity}}'
     | group tbCovered=sum(coverBytes)/1000/1000/1000/1000, tbScanned=sum(columnFaultBytes)/1000/1000/1000/1000, cpuSeconds=sum(queryComputationCpuNs)/1000/1000/1000, tbMemoryUsed=sum(heapAllocatedBytes)/1000/1000/1000/1000, columnsQueriedPerEpoch=sum(columnsFaulted)/sum(epochsQueried) by lrqToken
     | let coverBytesPerScanBytes=tbCovered/tbScanned
     | sort -tbScanned

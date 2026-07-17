@@ -12,7 +12,7 @@ queries:
   title: Okta Source Coverage
   notes: 'What Okta data exists for this user? First/last event, count, countries, IPs. | Source: okta | Pivot if positive: Okta tab for full timeline'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | filter ts != null
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), Countries=array_agg_distinct(client.geographicalContext.country, 10), IPs=array_agg_distinct(client.ipAddress, 10) by Source=serverHost
@@ -22,7 +22,7 @@ queries:
   title: ZPA / Zscaler Session Coverage
   notes: 'What ZPA tunnel data exists? Confirms Zscaler was active and shows countries, public IPs. | Source: zscaler | Pivot if positive: ZIA tab for web history'
   pq: |-
-    serverHost='zscaler'
+    serverHost='{{src_zscaler|zscaler}}'
     | filter actor.email contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{entity}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{entity}}') OR event.users contains:anycase('{{username}}')
     | let ts=(TimestampConnectionStart || timestamp || sca:ingestTime)
     | filter ts != null
@@ -33,7 +33,7 @@ queries:
   title: ZIA Web Proxy Coverage
   notes: 'What ZIA data exists for this user? Confirms proxy was active. | Source: zia | Pivot if positive: ZIA tab'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | let ts=(timestamp || event.time || sca:ingestTime)
     | filter ts != null
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), ClientIPs=array_agg_distinct(event.ClientIP, 10), Apps=array_agg_distinct(event.appname, 10) by Source=serverHost
@@ -63,7 +63,7 @@ queries:
   title: Navan Travel Coverage
   notes: 'Does Navan have travel bookings for this user? Corroborates geo anomalies. | Source: navan-travel-bookings | Pivot if positive: Travel tab'
   pq: |-
-    serverHost='navan-travel-bookings'
+    serverHost='{{src_navan_travel_bookings|navan-travel-bookings}}'
     | filter passengers.person.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{username}}') OR booker.email contains:anycase('{{entity}}')
     | let ts=(timestamp || created || lastModified || sca:ingestTime)
     | filter ts != null
@@ -104,7 +104,7 @@ queries:
   title: Okta Full Raw Timeline
   notes: 'Complete authentication and session timeline with IP, geo, ISP, OS, browser, user agent. | Source: okta | Pivot if positive: New country → ZIA/ZPA location. New device → LKP-01. Failures then success → OKT-04'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 5000
@@ -113,7 +113,7 @@ queries:
   title: Okta Country / City / ISP Summary
   notes: 'Clean human-presence location summary — successful human auth only, no automation noise. | Source: okta | Pivot if positive: New country → ZPA COV-03. Travel tab for Navan corroboration'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' outcome.result='SUCCESS' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='SUCCESS' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
     | filter eventType contains ('user.session.start', 'user.authentication.sso', 'user.authentication.auth_via_mfa')
     | group DaysActive=estimate_distinct(timebucket(published,'1d')), Events=count(), IPs=array_agg_distinct(client.ipAddress, 10), ISPs=array_agg_distinct(actor.isp, 5) by Country=client.geographicalContext.country, State=client.geographicalContext.state, City=client.geographicalContext.city
     | sort -DaysActive
@@ -121,7 +121,7 @@ queries:
   title: Okta App Access Summary
   notes: 'Which apps did the user access via Okta SSO? Volume per app over time. | Source: okta | Pivot if positive: Unusual new app → check that source log directly (Salesforce, Atlassian, etc.)'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' eventType='user.authentication.sso'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.authentication.sso'
     | group Events=count() by App=target.displayName, Day.timestamp=timebucket(published,'1d')
     | sort -Day.timestamp
     | transpose App on Day.timestamp
@@ -129,7 +129,7 @@ queries:
   title: Okta Failed Events
   notes: 'Authentication failures — wrong password, MFA errors, locked out. Look for failures before success. | Source: okta | Pivot if positive: Failures from new IP/country followed by success → account takeover concern'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' outcome.result='FAILURE'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='FAILURE'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 2000
@@ -138,7 +138,7 @@ queries:
   title: Okta MFA Factor Activations
   notes: 'Did the user add a new MFA factor or device? New factor = potential attacker persistence. | Source: okta | Pivot if positive: New factor + new geo + sensitive app access = high concern'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 500
@@ -147,7 +147,7 @@ queries:
   title: Okta Device Activations
   notes: 'Was a new device enrolled in Okta? Shows device type, OS, city. | Source: okta | Pivot if positive: New device + file downloads = collection from new endpoint'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' eventType='device.lifecycle.activate'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='device.lifecycle.activate'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 500
@@ -156,7 +156,7 @@ queries:
   title: Okta Offboarding — Lifecycle Events
   notes: 'When was the account deactivated? Who ran the offboarding? What was cleared? | Source: okta | Pivot if positive: Cross-reference with Endpoint final activity timestamp'
   pq: |-
-    serverHost='okta'
+    serverHost='{{src_okta|okta}}'
     | filter target contains:anycase('{{entity}}') OR actor.alternateId == '{{entity}}'
     | filter eventType in ('user.lifecycle.deactivate','user.session.clear','user.account.update_password','group.user_membership.remove','app.user_membership.remove')
     | let ts=(timestamp || published || event.time || sca:ingestTime)
@@ -167,7 +167,7 @@ queries:
   title: Azure Sign-In Activity — Location and App
   notes: 'What Azure/M365 apps did the user access and from where? Covers Teams, OneDrive, SharePoint. | Source: Azure | Pivot if positive: OneDrive SyncEngine = standard laptop sync. New app or new country → investigate'
   pq: |-
-    serverHost='Azure' UserPrincipalName='{{entity}}'
+    serverHost='{{src_azure|Azure}}' UserPrincipalName='{{entity}}'
     | let ts=(timestamp || createdDateTime || sca:ingestTime)
     | sort -ts
     | limit 5000
@@ -176,7 +176,7 @@ queries:
   title: Azure OneDrive — Sharing and Downloads
   notes: 'Did the user share, download, or create anonymous links in OneDrive? | Source: onedrive | Pivot if positive: Anonymous link created + sensitive file = high concern. Unmanaged device download = investigate'
   pq: |-
-    serverHost='onedrive' userPrincipalName='{{entity}}'
+    serverHost='{{src_onedrive|onedrive}}' userPrincipalName='{{entity}}'
     | filter operation matches:anycase ('SharingSet|SharingInvitationCreated|AnonymousLinkCreated|FileDownloaded|FileSyncDownloaded|FileDeleted')
     | let ts=(timestamp || createdDateTime || sca:ingestTime)
     | sort -ts
@@ -186,7 +186,7 @@ queries:
   title: 1Password Sign-ins and Item Usage
   notes: 'Did the user access secrets or sign in from unusual clients/IPs? | Source: 1password | Pivot if positive: Endpoint process/user and Okta session at same time'
   pq: |-
-    serverHost='1password'
+    serverHost='{{src_1password|1password}}'
     | filter target_user.email contains:anycase('{{entity}}') OR user.email contains:anycase('{{entity}}')
     | sort -timestamp
     | limit 2000
@@ -204,7 +204,7 @@ queries:
   title: Snyk Service Account / Token / Role Changes
   notes: 'Any Snyk token, service account, project ignore, or role change activity? | Source: snyk | Pivot if positive: GitHub repo and token activity'
   pq: |-
-    serverHost='snyk'
+    serverHost='{{src_snyk|snyk}}'
     | filter content.email contains:anycase('{{entity}}') OR user_id contains:anycase('{{username}}') OR content contains:anycase('{{username}}')
     | filter event contains:anycase('service_account') OR event contains:anycase('role') OR event contains:anycase('token') OR event contains:anycase('ignore') OR event contains:anycase('integration')
     | sort -timestamp
@@ -223,7 +223,7 @@ queries:
   title: JumpCloud User / Device Activity
   notes: 'JumpCloud auth, device, or directory events for user. | Source: jumpcloud | Pivot if positive: Device identity mapping and endpoint timeline'
   pq: |-
-    serverHost='jumpcloud'
+    serverHost='{{src_jumpcloud|jumpcloud}}'
     | filter initiated_by.email contains:anycase('{{entity}}') OR initiated_by.username contains:anycase('{{username}}') OR useragent contains:anycase('{{username}}')
     | sort -timestamp
     | limit 2000

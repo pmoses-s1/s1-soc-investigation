@@ -92,7 +92,7 @@ queries:
   title: Software Inventory by App/Tag
   notes: 'What risky or policy-relevant software exists across endpoints? Uses .timestamp aliases so SDL renders time values as dates. | Source: oplockdown | Pivot if positive: EDR process execution, ZIA, DNS/PANW, user coverage'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | group
         Endpoints=estimate_distinct(endpoint.name),
         Users=estimate_distinct(owner),
@@ -105,7 +105,7 @@ queries:
   title: Newly Observed Software by Endpoint
   notes: 'Which apps first appeared recently on a user or endpoint? | Source: oplockdown | Pivot if positive: EDR process creation by app name; endpoint timeline'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | group
         FirstRecord.timestamp=min(timestamp),
         LastRecord.timestamp=max(timestamp),
@@ -117,7 +117,7 @@ queries:
   title: High-Risk Software Categories
   notes: 'Show VPN, RemoteManagement, AI, Filesharing, P2P and Games software by scope. | Source: oplockdown | Pivot if positive: OPL-04 endpoint inventory; EDR correlation'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | filter tag in ('VPN','RemoteManagement','AI-MISUSE','AI-IDE','Filesharing','Peer-To-Peer','Games')
     | group
         Endpoints=estimate_distinct(endpoint.name),
@@ -131,7 +131,7 @@ queries:
   title: Endpoint Software Inventory
   notes: 'For one host, list all known software and tags. | Source: oplockdown | Pivot if positive: EDR process, network, USB, ZIA'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | filter endpoint.name contains:anycase('{{hostname}}')
     | group
         FirstRecord.timestamp=min(timestamp),
@@ -143,8 +143,8 @@ queries:
   title: Software by User / Owner
   notes: 'What policy-relevant apps are mapped to a subject owner? | Source: oplockdown | Pivot if positive: User coverage, endpoint EDR, ZIA upload activity'
   pq: |-
-    serverHost='oplockdown'
-    | filter owner contains:anycase('<USER>')
+    serverHost='{{src_oplockdown|oplockdown}}'
+    | filter owner contains:anycase('{{username}}')
     | group
         Endpoints=estimate_distinct(endpoint.name),
         FirstRecord.timestamp=min(timestamp),
@@ -157,7 +157,7 @@ queries:
   title: Orphaned / Unknown Owner Software
   notes: 'Which high-risk apps are installed on endpoints without an owner? | Source: oplockdown | Pivot if positive: Asset inventory, EDR endpoint.name, device owner lookup'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | filter owner == '-' OR owner == null OR owner == ''
     | group
         Endpoints=estimate_distinct(endpoint.name),
@@ -174,7 +174,7 @@ queries:
     event.type in ('Process Creation','Process','Process Start')
     | let Proc=(process.name || src.process.name || tgt.process.name || '')
     | let Cmd=(process.cmdline || src.process.cmdline || tgt.process.cmdline || '')
-    | filter Proc contains:anycase('<APP_NAME>') OR Cmd contains:anycase('<APP_NAME>')
+    | filter Proc contains:anycase('{{app_name}}') OR Cmd contains:anycase('{{app_name}}')
     | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(user.name || src.process.user), Proc, Cmd
     | sort -timestamp
     | limit 2000

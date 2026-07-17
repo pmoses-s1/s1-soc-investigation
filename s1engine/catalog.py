@@ -26,7 +26,11 @@ except Exception:  # pragma: no cover - optional dep
     _HAVE_YAML = False
 
 
-_TEMPLATE_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
+# {{name}}  -> required variable (skips the query if unset)
+# {{name|default}} -> optional variable; uses `default` when unset, never skips.
+#                     Used for data-source names (serverHost) so the catalog runs
+#                     out of the box but each source is overridable per tenant.
+_TEMPLATE_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*(?:\|([^}]*?))?\s*\}\}")
 
 
 @dataclass
@@ -71,20 +75,41 @@ class Query:
     notes: str = ""
 
     def render(self, variables: Dict[str, str]) -> str:
-        """Substitute {{var}} placeholders. Unknown placeholders raise."""
+        """Substitute {{var}} / {{var|default}} placeholders.
+
+        A provided, non-empty value wins. Otherwise the inline default is used
+        if present. A variable with neither a value nor a default raises (but the
+        engine skips such queries before rendering; see required_vars)."""
         def repl(m: "re.Match[str]") -> str:
-            name = m.group(1)
-            if name not in variables:
-                raise KeyError(
-                    f"Query '{self.id}' references {{{{{name}}}}} but no value "
-                    f"was provided. Pass it via --var {name}=... (entity is set "
-                    f"automatically)."
-                )
-            return str(variables[name])
+            name, default = m.group(1), m.group(2)
+            if name in variables and str(variables[name]).strip():
+                return str(variables[name])
+            if default is not None:
+                return default
+            raise KeyError(
+                f"Query '{self.id}' references {{{{{name}}}}} but no value "
+                f"was provided. Pass it via --var {name}=... (entity is set "
+                f"automatically)."
+            )
         return _TEMPLATE_RE.sub(repl, self.pq)
 
     def required_vars(self) -> List[str]:
-        return sorted(set(_TEMPLATE_RE.findall(self.pq)))
+        """Variables that gate execution: a name is required only if it appears
+        at least once WITHOUT an inline default. Defaulted names never skip."""
+        required = set()
+        for name, default in _TEMPLATE_RE.findall(self.pq):
+            if not default:
+                required.add(name)
+        return sorted(required)
+
+    def template_vars(self) -> List[tuple]:
+        """All (name, default) pairs used by this query; default is '' if none."""
+        seen: Dict[str, str] = {}
+        for name, default in _TEMPLATE_RE.findall(self.pq):
+            # Prefer a non-empty default if any occurrence supplies one.
+            if name not in seen or (default and not seen[name]):
+                seen[name] = default or ""
+        return sorted(seen.items())
 
 
 @dataclass
@@ -100,6 +125,24 @@ class Catalog:
         for q in self.queries:
             out.update(q.required_vars())
         return sorted(out)
+
+    def template_vars(self) -> Dict[str, str]:
+        """Union of every (name -> default) used across the catalog. Default is
+        '' for required subject variables, or the inline default for overridable
+        ones (e.g. data-source names). A name required anywhere stays required
+        (empty default) even if another query defaults it."""
+        required = set()
+        defaults: Dict[str, str] = {}
+        for q in self.enabled_queries():
+            for name, default in q.template_vars():
+                if default:
+                    defaults.setdefault(name, default)
+                else:
+                    required.add(name)
+        out: Dict[str, str] = {}
+        for name in set(defaults) | required:
+            out[name] = "" if name in required else defaults.get(name, "")
+        return dict(sorted(out.items()))
 
 
 def load_catalog(path: str | Path) -> Catalog:

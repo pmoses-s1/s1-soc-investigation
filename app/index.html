@@ -281,24 +281,26 @@
   <div class="box">
     <span class="x" id="varsClose">&times;</span>
     <h3>Investigation variables</h3>
-    <div class="hint">These fill query placeholders like {{hostname}}. The entity ({{entity}}) is set on the run form. A query that needs a variable you leave blank is skipped (not failed), so you can run the identity queries first, then fill in the host/agent you discover and re-run.</div>
-    <div class="row">
-      <div><label>Hostname <span class="help" data-tip="{{hostname}} — endpoint/device name, discovered during the identity phase.">?</span></label><input id="v_hostname"></div>
-      <div><label>Agent UUID <span class="help" data-tip="{{agent_uuid}} — SentinelOne agent UUID for the endpoint.">?</span></label><input id="v_agent_uuid"></div>
+    <div class="hint">These fill query placeholders like {{hostname}}. The entity ({{entity}}) is set on the run form. A query that needs a subject variable you leave blank is skipped (not failed), so you can run the identity queries first, then fill in what you discover and re-run.</div>
+    <div class="btnrow" style="margin-top:10px">
+      <button class="ghost sm" id="btnVarsImport">Import variables</button>
+      <button class="ghost sm" id="btnVarsExport">Export variables</button>
+      <input type="file" id="varsFileInput" accept=".json,application/json" style="display:none">
+      <span class="help" data-tip="Save the whole variable set to a JSON file, or load one, so you can reuse the same configuration across cases or share it with a teammate. Import merges into the current values.">?</span>
     </div>
-    <div class="row">
-      <div><label>IP address <span class="help" data-tip="{{ip}} — a suspicious IP to pivot across sources.">?</span></label><input id="v_ip"></div>
-      <div><label>Username <span class="help" data-tip="{{username}} — OS / login username if different from the email.">?</span></label><input id="v_username"></div>
-    </div>
-    <div class="row">
-      <div><label>Salesforce user ID <span class="help" data-tip="{{sf_user_id}} — the 18-char Salesforce user id.">?</span></label><input id="v_sf_user_id"></div>
-      <div><label>Session <span class="help" data-tip="{{session}} — a session key to reconstruct a session timeline.">?</span></label><input id="v_session"></div>
-    </div>
-    <div style="margin-top:14px;font-size:12.5px;color:var(--label);font-weight:600">Config datatables (optional)
-      <span class="help" data-tip="The datatable names for the identity-mapping queries. Set the ones your tenant has; queries that need an unset datatable are skipped. Placeholders are pre-filled with the source workbook's names.">?</span></div>
+    <div style="margin-top:16px;font-size:12.5px;color:var(--label);font-weight:600">Investigation subject
+      <span class="help" data-tip="Values about the subject you are investigating. Each fills the matching {{placeholder}}. Leave one blank to skip the queries that need it.">?</span></div>
+    <div class="hint">Leave blank to skip the queries that need that value.</div>
+    <div id="subjectFields"></div>
+    <div style="margin-top:16px;font-size:12.5px;color:var(--label);font-weight:600">Config datatables (optional)
+      <span class="help" data-tip="Datatable names for the identity-mapping queries. Set the ones your tenant has; queries that need an unset datatable are skipped. Placeholders show the source workbook's names.">?</span></div>
     <div class="hint">Set only the datatables your tenant has. Leave blank to skip those queries.</div>
     <div id="dtFields"></div>
-    <label>Custom variables <span class="help" data-tip="One per line as name=value. Fills any other {{placeholder}} a catalog uses.">?</span></label>
+    <div style="margin-top:16px;font-size:12.5px;color:var(--label);font-weight:600">Data source names (optional overrides)
+      <span class="help" data-tip="The SDL serverHost source names the queries read from. Each already has a sensible default (shown as the placeholder), so queries run out of the box. Override one only if your tenant ingests that source under a different name.">?</span></div>
+    <div class="hint">Defaults are pre-filled. Override only if a source is named differently on your tenant.</div>
+    <div id="srcFields"></div>
+    <label style="margin-top:16px">Custom variables <span class="help" data-tip="One per line as name=value. Fills any other {{placeholder}} a catalog uses.">?</span></label>
     <textarea id="v_custom" placeholder="one per line, e.g.  repo=acme/payments"></textarea>
     <button id="btnVarsSave">Save variables</button>
   </div>
@@ -335,13 +337,11 @@ async function apiPost(p,b){return (await fetch(p,{method:"POST",headers:hdrs(),
 const $=id=>document.getElementById(id);
 
 let CATALOGS=[], CURRENT=null, POLL=null, LASTSEQ=0;
-let DTS=[], MODE="single", SUBJECTS=[], BATCH=[], BATCHPOLL=null;
+let DTS=[], SUBJECT_VARS=[], SRCS=[], MODE="single", SUBJECTS=[], BATCH=[], BATCHPOLL=null;
 let RUN_START=0, COUNTS={cached:0,throttled:0,retried:0,subdivided:0,failed:0,done:0}, SELECTED_QIDS=null, CONNECTED=false;
 let TOKEN_COUNT=0, poolEdited=false;
 let VARS={};
 try{ VARS=JSON.parse(localStorage.getItem("s1ie_vars")||"{}"); }catch(e){ VARS={}; }
-const KNOWN_VARS=["hostname","agent_uuid","ip","username","sf_user_id","session"];
-
 function renderVarsSummary(){
   const set=Object.keys(VARS).filter(k=>String(VARS[k]).trim());
   $("varsSummary").textContent = set.length ? ("variables set: "+set.join(", ")) : "no variables set (entity only)";
@@ -353,26 +353,69 @@ function updateCatVars(){
   const unmet=c.vars.filter(v=>!provided.has(v));
   $("catVars").innerHTML="Needs: "+c.vars.map(v=>unmet.includes(v)
       ?`<b style="color:var(--amb)">${v}</b>`:`<span style="color:var(--grn)">${v}</span>`).join(", ")
-    + (unmet.length?` — set the missing ones in Variables, or those queries are skipped.`:"");
+    + (unmet.length?`. Set the missing ones in Variables, or those queries are skipped.`:"");
 }
-$("btnVars").onclick=()=>{
-  KNOWN_VARS.forEach(k=>{ $("v_"+k).value=VARS[k]||""; });
-  DTS.forEach(dt=>{ const el=$("dt_"+dt.var); if(el) el.value=VARS[dt.var]||""; });
-  const dtset=new Set(DTS.map(dt=>dt.var));
-  $("v_custom").value=Object.entries(VARS).filter(([k])=>!KNOWN_VARS.includes(k)&&!dtset.has(k)).map(([k,v])=>`${k}=${v}`).join("\n");
-  $("varsModal").classList.add("open");
-};
+/* Build the dynamic variable field rows (subject / datatables / source overrides). */
+function fieldRows(containerId, items){
+  const box=$(containerId); if(!box) return; box.innerHTML="";
+  for(let i=0;i<items.length;i+=2){
+    const row=document.createElement("div"); row.className="row";
+    [items[i],items[i+1]].filter(Boolean).forEach(it=>{
+      const d=document.createElement("div");
+      const tip=(it.tip||"").replace(/"/g,"&quot;");
+      d.innerHTML=`<label style="font-weight:400">${it.label} <span class="help" data-tip="${tip}">?</span></label>`
+        +`<input id="${it.id}" placeholder="${(it.ph||"").replace(/"/g,"&quot;")}">`;
+      row.appendChild(d);
+    });
+    box.appendChild(row);
+  }
+}
+function renderVarFields(){
+  fieldRows("subjectFields", SUBJECT_VARS.map(s=>({id:"sv_"+s.var,label:s.label,tip:s.tip})));
+  fieldRows("dtFields", DTS.map(d=>({id:"dt_"+d.var,label:d.label,tip:"Datatable name; blank skips queries that need it.",ph:d.default})));
+  fieldRows("srcFields", SRCS.map(s=>({id:"srcf_"+s.var,label:s.label,tip:s.tip,ph:s.default})));
+}
+function fillVarFields(){
+  SUBJECT_VARS.forEach(s=>{ const el=$("sv_"+s.var); if(el) el.value=VARS[s.var]||""; });
+  DTS.forEach(d=>{ const el=$("dt_"+d.var); if(el) el.value=VARS[d.var]||""; });
+  SRCS.forEach(s=>{ const el=$("srcf_"+s.var); if(el) el.value=VARS[s.var]||""; });
+  const known=new Set([...SUBJECT_VARS.map(s=>s.var),...DTS.map(d=>d.var),...SRCS.map(s=>s.var)]);
+  $("v_custom").value=Object.entries(VARS).filter(([k])=>!known.has(k)).map(([k,v])=>`${k}=${v}`).join("\n");
+}
+$("btnVars").onclick=()=>{ fillVarFields(); $("varsModal").classList.add("open"); };
 $("varsClose").onclick=()=>$("varsModal").classList.remove("open");
 $("varsModal").onclick=e=>{ if(e.target.id==="varsModal")$("varsModal").classList.remove("open"); };
 $("btnVarsSave").onclick=()=>{
   const v={};
-  KNOWN_VARS.forEach(k=>{ const x=$("v_"+k).value.trim(); if(x)v[k]=x; });
-  DTS.forEach(dt=>{ const el=$("dt_"+dt.var); if(el&&el.value.trim()) v[dt.var]=el.value.trim(); });
+  SUBJECT_VARS.forEach(s=>{ const el=$("sv_"+s.var); if(el&&el.value.trim()) v[s.var]=el.value.trim(); });
+  DTS.forEach(d=>{ const el=$("dt_"+d.var); if(el&&el.value.trim()) v[d.var]=el.value.trim(); });
+  SRCS.forEach(s=>{ const el=$("srcf_"+s.var); if(el&&el.value.trim()) v[s.var]=el.value.trim(); });
   ($("v_custom").value||"").split("\n").forEach(line=>{
     const i=line.indexOf("="); if(i>0){ const k=line.slice(0,i).trim(); const val=line.slice(i+1).trim(); if(k)v[k]=val; }
   });
   VARS=v; try{ localStorage.setItem("s1ie_vars",JSON.stringify(VARS)); }catch(e){}
   renderVarsSummary(); updateCatVars(); updatePreview(); $("varsModal").classList.remove("open");
+};
+/* Import / export the whole variable set as JSON for reuse across cases. */
+$("btnVarsExport").onclick=()=>{
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(VARS,null,2)],{type:"application/json"}));
+  a.download="s1_investigation_variables.json"; a.click();
+};
+$("btnVarsImport").onclick=()=>$("varsFileInput").click();
+$("varsFileInput").onchange=e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{ try{
+      const o=JSON.parse(r.result);
+      if(!o||typeof o!=="object"||Array.isArray(o)){ alert("Not a variables JSON object."); return; }
+      VARS={...VARS,...o}; try{ localStorage.setItem("s1ie_vars",JSON.stringify(VARS)); }catch(_){}
+      fillVarFields(); renderVarsSummary(); updateCatVars(); updatePreview();
+      alert("Imported "+Object.keys(o).length+" variable(s).");
+    }catch(err){ alert("Could not parse JSON: "+err); }
+    finally{ e.target.value=""; }
+  };
+  r.readAsText(f);
 };
 $("btnRefreshCatalogs").onclick=async()=>{
   const b=$("btnRefreshCatalogs"); b.disabled=true; b.textContent="Refreshing…";
@@ -398,20 +441,9 @@ async function loadConfig(){
   sel.onchange=onCatalogChange;
   setConn(c.creds_ok,c.console_url,c.num_tokens);
   if(c.console_url&&!$("console").value)$("console").value=c.console_url;
-  DTS=c.datatables||[]; renderDtFields();
+  DTS=c.datatables||[]; SUBJECT_VARS=c.subject_vars||[]; SRCS=c.source_vars||[];
+  renderVarFields();
   renderVarsSummary(); updateCatVars();
-}
-function renderDtFields(){
-  const box=$("dtFields"); if(!box) return; box.innerHTML="";
-  for(let i=0;i<DTS.length;i+=2){
-    const row=document.createElement("div"); row.className="row";
-    [DTS[i],DTS[i+1]].filter(Boolean).forEach(dt=>{
-      const col=document.createElement("div");
-      col.innerHTML=`<label style="font-weight:400">${dt.label}</label><input id="dt_${dt.var}" placeholder="${dt.default}">`;
-      row.appendChild(col);
-    });
-    box.appendChild(row);
-  }
 }
 function setConn(ok,url,n){
   CONNECTED=!!ok;

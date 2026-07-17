@@ -170,6 +170,49 @@ def _catalog_roots():
     return [BUNDLED_CATALOGS, USER_CATALOGS]
 
 
+# Subject-input variables: friendly label + tooltip for the Variables modal. These
+# gate skipping (a query needing one that is unset is skipped, not failed).
+SUBJECT_VARS = [
+    {"var": "hostname", "label": "Hostname", "tip": "{{hostname}} - endpoint / device name, usually discovered during the identity phase."},
+    {"var": "agent_uuid", "label": "Agent UUID", "tip": "{{agent_uuid}} - the SentinelOne agent UUID for the endpoint."},
+    {"var": "ip", "label": "IP address", "tip": "{{ip}} - a suspicious IP to pivot across sources."},
+    {"var": "username", "label": "Username", "tip": "{{username}} - OS / login / owner username if different from the email."},
+    {"var": "sf_user_id", "label": "Salesforce user ID", "tip": "{{sf_user_id}} - the 18-char Salesforce user id."},
+    {"var": "session", "label": "Session key", "tip": "{{session}} - a session / login key used to reconstruct a session timeline."},
+    {"var": "app_name", "label": "App / tool name", "tip": "{{app_name}} - software or remote-tool name to hunt (e.g. AnyDesk, TeamViewer, rclone)."},
+    {"var": "domain", "label": "Domain / host substring", "tip": "{{domain}} - a domain or hostname substring to match in web/DNS/URL fields."},
+    {"var": "login_key", "label": "Login key", "tip": "{{login_key}} - Salesforce EventLogFile LoginKey to correlate a single login session."},
+    {"var": "file_or_title", "label": "File / doc title", "tip": "{{file_or_title}} - a filename or document title substring to search across storage/collab sources."},
+]
+
+
+def _source_vars() -> list:
+    """Overridable data-source names ({{src_*|default}}) used across all catalogs.
+
+    These carry an inline default (the source's name in the reference workbook), so
+    queries run out of the box; the user only overrides one if their tenant ingests
+    that source under a different serverHost. Derived live so it stays in sync."""
+    found: dict = {}
+    for base in (BUNDLED_CATALOGS, USER_CATALOGS):
+        if not base.is_dir():
+            continue
+        for pth in list(base.glob("*.y*ml")) + list(base.glob("*.json")):
+            try:
+                cat = load_catalog(pth)
+            except Exception:
+                continue
+            for name, default in cat.template_vars().items():
+                if name.startswith("src_") and default:
+                    found.setdefault(name, default)
+    out = []
+    for var, default in sorted(found.items()):
+        out.append({"var": var, "default": default,
+                    "label": default,
+                    "tip": f"SDL serverHost source name for '{default}'. Override only if your "
+                           f"tenant ingests this source under a different name; blank uses '{default}'."})
+    return out
+
+
 def _resolve_output_dir(raw):
     raw = (raw or "").strip()
     if not raw:
@@ -591,7 +634,8 @@ class H(BaseHTTPRequestHandler):
                                     "output_base": str(OUTPUT_BASE), "exposed": EXPOSED,
                                     "version": os.environ.get("S1IE_VERSION") or ENGINE_VERSION,
                                     "catalog_repo": f"{CATALOG_REPO}@{CATALOG_REPO_REF}",
-                                    "datatables": DATATABLES})
+                                    "datatables": DATATABLES, "subject_vars": SUBJECT_VARS,
+                                    "source_vars": _source_vars()})
         if p == "/api/runs":
             with _RUNS_LOCK:
                 runs = [{"run_id": r["run_id"], "case": r["case"], "entity": r["entity"],

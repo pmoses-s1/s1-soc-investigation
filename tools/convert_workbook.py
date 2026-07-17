@@ -37,14 +37,47 @@ DOMAIN_NAME = {
  "web_network":"DFIR: Web & network","cloud":"DFIR: Cloud","saas_apps":"DFIR: SaaS & apps",
  "exfil_dlp":"DFIR: Exfil & DLP","correlation":"DFIR: Cross-source correlation",
 }
+# Canonical placeholder -> template variable. Covers both %X% and <X> delimiters.
+# Anything not listed here still gets parameterized generically (see mapph) so no
+# placeholder is ever left as a literal string in a query.
 PLACE = [("%EMAIL%","{{entity}}"),("%USERNAME%","{{username}}"),("%AGENTUUID%","{{agent_uuid}}"),
  ("%HOSTNAME%","{{hostname}}"),("%IP%","{{ip}}"),("%SF_USER_ID%","{{sf_user_id}}"),
- ("<IP>","{{ip}}"),("<SESSION>","{{session}}"),("<HOST>","{{hostname}}")]
+ ("%SESSION%","{{session}}"),("%SESSION_KEY%","{{session}}"),("%LOGIN_KEY%","{{login_key}}"),
+ ("%DOMAIN%","{{domain}}"),("%APP_NAME%","{{app_name}}"),("%FILE_OR_TITLE%","{{file_or_title}}"),
+ ("%USER%","{{username}}"),("%HOST%","{{hostname}}"),
+ ("<IP>","{{ip}}"),("<SESSION>","{{session}}"),("<SESSION_KEY>","{{session}}"),
+ ("<HOST>","{{hostname}}"),("<HOSTNAME>","{{hostname}}"),("<USER>","{{username}}"),
+ ("<USERNAME>","{{username}}"),("<AGENTUUID>","{{agent_uuid}}"),("<EMAIL>","{{entity}}"),
+ ("<LOGIN_KEY>","{{login_key}}"),("<DOMAIN>","{{domain}}"),("<APP_NAME>","{{app_name}}"),
+ ("<FILE_OR_TITLE>","{{file_or_title}}"),("<SF_USER_ID>","{{sf_user_id}}")]
 DT_VARS = set()
+SRC_VARS = set()      # serverHost source names turned into overridable {{src_*|default}}
+GENERIC_VARS = set()  # any other placeholder we auto-slugged, for reporting
+
+def _slug_var(tok):
+    return re.sub(r'[^a-z0-9]+', '_', tok.lower()).strip('_')
 
 def mapph(s):
     for a,b in PLACE: s=s.replace(a,b)
+    # Generic fallback: convert any remaining %X% or <X> delimited placeholder to a
+    # {{slug}} variable so nothing is left literal (which would match no rows).
+    def genrepl(m):
+        var=_slug_var(m.group(1)); GENERIC_VARS.add(var)
+        return "{{"+var+"}}"
+    s=re.sub(r'%([A-Za-z][A-Za-z0-9_]*)%', genrepl, s)
+    s=re.sub(r'<([A-Za-z][A-Za-z0-9_]*)>', genrepl, s)
     return s
+
+def param_serverhost(s):
+    """serverHost='zia' -> serverHost='{{src_zia|zia}}' (value kept as default,
+    so it runs out of the box but is overridable per tenant). Empty is left as-is."""
+    def repl(m):
+        q, val = m.group(1), m.group(2)
+        if not val.strip():
+            return m.group(0)
+        var="src_"+_slug_var(val); SRC_VARS.add((var, val))
+        return f"serverHost={q}{{{{{var}|{val}}}}}{q}"
+    return re.sub(r"serverHost\s*=\s*(['\"])(.*?)\1", repl, s)
 
 def expand_any(s):
     pat = re.compile(r'any\(\s*(.*?)\)\s*contains:(anycase|matchcase)\(\s*("(?:[^"]*)"|\'(?:[^\']*)\')\s*\)', re.DOTALL)
@@ -63,7 +96,7 @@ def normalize(s):
     s=s.replace('\\"','"').replace('\\ ',' ')
     s=re.sub(r"contains\s+'([^']*)'", r'contains:anycase("\1")', s)
     s=re.sub(r'contains\s+"([^"]*)"', r'contains:anycase("\1")', s)
-    s=expand_any(s); s=param_datatables(s)
+    s=expand_any(s); s=param_datatables(s); s=param_serverhost(s)
     return s
 
 def looks_like_query(pq):
@@ -136,3 +169,5 @@ for dom,qs in domains.items():
 dump(OUT/"dfir_insider_threat_full.yaml","DFIR: Insider threat (full sweep)", master)
 print(f"wrote {sum(1 for qs in domains.values() if qs)} domain catalogs + master ({len(master)} queries, dropped {dropped})")
 print("datatable vars:", sorted(DT_VARS))
+print("source vars   :", sorted(SRC_VARS))
+print("generic vars  :", sorted(GENERIC_VARS))

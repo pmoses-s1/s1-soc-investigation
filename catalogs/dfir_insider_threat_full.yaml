@@ -12,7 +12,7 @@ queries:
   title: Okta Source Coverage
   notes: 'What Okta data exists for this user? First/last event, count, countries, IPs. | Source: okta | Pivot if positive: Okta tab for full timeline'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | filter ts != null
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), Countries=array_agg_distinct(client.geographicalContext.country, 10), IPs=array_agg_distinct(client.ipAddress, 10) by Source=serverHost
@@ -22,7 +22,7 @@ queries:
   title: ZPA / Zscaler Session Coverage
   notes: 'What ZPA tunnel data exists? Confirms Zscaler was active and shows countries, public IPs. | Source: zscaler | Pivot if positive: ZIA tab for web history'
   pq: |-
-    serverHost='zscaler'
+    serverHost='{{src_zscaler|zscaler}}'
     | filter actor.email contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{entity}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{entity}}') OR event.users contains:anycase('{{username}}')
     | let ts=(TimestampConnectionStart || timestamp || sca:ingestTime)
     | filter ts != null
@@ -33,7 +33,7 @@ queries:
   title: ZIA Web Proxy Coverage
   notes: 'What ZIA data exists for this user? Confirms proxy was active. | Source: zia | Pivot if positive: ZIA tab'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | let ts=(timestamp || event.time || sca:ingestTime)
     | filter ts != null
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), ClientIPs=array_agg_distinct(event.ClientIP, 10), Apps=array_agg_distinct(event.appname, 10) by Source=serverHost
@@ -63,7 +63,7 @@ queries:
   title: Navan Travel Coverage
   notes: 'Does Navan have travel bookings for this user? Corroborates geo anomalies. | Source: navan-travel-bookings | Pivot if positive: Travel tab'
   pq: |-
-    serverHost='navan-travel-bookings'
+    serverHost='{{src_navan_travel_bookings|navan-travel-bookings}}'
     | filter passengers.person.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{username}}') OR booker.email contains:anycase('{{entity}}')
     | let ts=(timestamp || created || lastModified || sca:ingestTime)
     | filter ts != null
@@ -104,7 +104,7 @@ queries:
   title: Okta Full Raw Timeline
   notes: 'Complete authentication and session timeline with IP, geo, ISP, OS, browser, user agent. | Source: okta | Pivot if positive: New country → ZIA/ZPA location. New device → LKP-01. Failures then success → OKT-04'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 5000
@@ -113,7 +113,7 @@ queries:
   title: Okta Country / City / ISP Summary
   notes: 'Clean human-presence location summary — successful human auth only, no automation noise. | Source: okta | Pivot if positive: New country → ZPA COV-03. Travel tab for Navan corroboration'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' outcome.result='SUCCESS' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='SUCCESS' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
     | filter eventType contains ('user.session.start', 'user.authentication.sso', 'user.authentication.auth_via_mfa')
     | group DaysActive=estimate_distinct(timebucket(published,'1d')), Events=count(), IPs=array_agg_distinct(client.ipAddress, 10), ISPs=array_agg_distinct(actor.isp, 5) by Country=client.geographicalContext.country, State=client.geographicalContext.state, City=client.geographicalContext.city
     | sort -DaysActive
@@ -121,7 +121,7 @@ queries:
   title: Okta App Access Summary
   notes: 'Which apps did the user access via Okta SSO? Volume per app over time. | Source: okta | Pivot if positive: Unusual new app → check that source log directly (Salesforce, Atlassian, etc.)'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' eventType='user.authentication.sso'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.authentication.sso'
     | group Events=count() by App=target.displayName, Day.timestamp=timebucket(published,'1d')
     | sort -Day.timestamp
     | transpose App on Day.timestamp
@@ -129,7 +129,7 @@ queries:
   title: Okta Failed Events
   notes: 'Authentication failures — wrong password, MFA errors, locked out. Look for failures before success. | Source: okta | Pivot if positive: Failures from new IP/country followed by success → account takeover concern'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' outcome.result='FAILURE'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='FAILURE'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 2000
@@ -138,7 +138,7 @@ queries:
   title: Okta MFA Factor Activations
   notes: 'Did the user add a new MFA factor or device? New factor = potential attacker persistence. | Source: okta | Pivot if positive: New factor + new geo + sensitive app access = high concern'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 500
@@ -147,7 +147,7 @@ queries:
   title: Okta Device Activations
   notes: 'Was a new device enrolled in Okta? Shows device type, OS, city. | Source: okta | Pivot if positive: New device + file downloads = collection from new endpoint'
   pq: |-
-    serverHost='okta' actor.alternateId='{{entity}}' eventType='device.lifecycle.activate'
+    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='device.lifecycle.activate'
     | let ts=(timestamp || published || event.time || sca:ingestTime)
     | sort -ts
     | limit 500
@@ -156,7 +156,7 @@ queries:
   title: Okta Offboarding — Lifecycle Events
   notes: 'When was the account deactivated? Who ran the offboarding? What was cleared? | Source: okta | Pivot if positive: Cross-reference with Endpoint final activity timestamp'
   pq: |-
-    serverHost='okta'
+    serverHost='{{src_okta|okta}}'
     | filter target contains:anycase('{{entity}}') OR actor.alternateId == '{{entity}}'
     | filter eventType in ('user.lifecycle.deactivate','user.session.clear','user.account.update_password','group.user_membership.remove','app.user_membership.remove')
     | let ts=(timestamp || published || event.time || sca:ingestTime)
@@ -255,7 +255,7 @@ queries:
   title: GWS All Drive Activity — Overview
   notes: 'What Google Drive event types did this user generate? Baseline before drilling down. | Source: google_workspace | Pivot if positive: download, copy, print, trash spikes → drill into specific queries below'
   pq: |-
-    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
     | group Events=count() by EventName=event.name, Day.timestamp=timebucket(timestamp,'1d')
     | sort -Day.timestamp
     | transpose EventName on Day.timestamp
@@ -266,7 +266,7 @@ queries:
 
     NOTE: event.originating_app_id != ''124622177520'' excludes automated Glean/SCIO indexing. This is required — without this exclusion, results include thousands of automated ''downloads'' that are not user actions. | Source: google_workspace | Pivot if positive: Sensitive files → GWS-05 for classification. Endpoint Downloads folder EDR-07 for same filenames'
   pq: |-
-    serverHost='google_workspace' actor.email='{{entity}}' event.name='download' id.applicationName='drive'
+    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' event.name='download' id.applicationName='drive'
     | filter event.originating_app_id != '124622177520'
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -276,7 +276,7 @@ queries:
   title: GWS External Sharing
   notes: 'Were any files shared externally (public link, anyone with link, shared_externally)? | Source: google_workspace | Pivot if positive: Externally shared + Confidential/HC classification = escalate. Was file also downloaded?'
   pq: |-
-    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
     | filter event.visibility in:anycase ('public_on_the_web','people_with_link','shared_externally') OR event.old_visibility in:anycase ('public_on_the_web','people_with_link','shared_externally')
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -286,7 +286,7 @@ queries:
   title: GWS Deleted / Trashed Files
   notes: 'Did the user delete or trash files — especially after downloading them? Anti-forensics signal. | Source: google_workspace | Pivot if positive: Compare deletion timestamps to GWS-02 download timestamps for same doc IDs'
   pq: |-
-    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
     | filter event.name in:anycase ('trash','delete')
     | filter !(event.deletion_reason == 'trash_auto_delete')
     | let ts=(timestamp || event.time || sca:ingestTime)
@@ -297,7 +297,7 @@ queries:
   title: GWS Sensitive File Access — Confidential + HC
   notes: 'Which Confidential or Highly Confidential files did this user access, sync, or download? | Source: google_workspace | Pivot if positive: Repeated sync of same HC doc → EDR temp file artifacts for confirmation'
   pq: |-
-    serverHost='google_workspace' actor.email='{{entity}}' id.applicationName='drive'
+    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
     | filter classificationLabel in:anycase ('Highly Confidential','Confidential')
     | filter event.name in:anycase ('sync_item_content','download','access_item_content','view','copy','print')
     | let ts=(timestamp || event.time || sca:ingestTime)
@@ -308,7 +308,7 @@ queries:
   title: GWS Activity Daily Summary
   notes: 'How many events and unique documents per day? Identify spike days for deeper review. | Source: monitor | Pivot if positive: Peak days → run GWS-02 and GWS-05 scoped to those dates'
   pq: |-
-    serverHost='monitor' pqEvent='google_workspace_user_summary'
+    serverHost='{{src_monitor|monitor}}' pqEvent='google_workspace_user_summary'
     | filter actor.email == '{{entity}}'
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -321,7 +321,7 @@ queries:
 
     NOTE: Glean/SCIO crawler is excluded — it would generate thousands of false file_downloaded events. Always include these exclusions. | Source: slack | Pivot if positive: iPhone/Android downloads → outside ZIA inspection. Filenames → correlate with GWS downloads'
   pq: |-
-    serverHost='slack' actor.user.email='{{entity}}' action='file_downloaded'
+    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='file_downloaded'
     | filter !(context.app.name contains:anycase 'Glean')
     | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
     | filter !(context.ua contains:anycase 'Scio Search')
@@ -334,7 +334,7 @@ queries:
   title: Slack Non-Corporate Device Downloads
   notes: 'Files downloaded to personal devices only (excludes corporate Windows device). Replace Windows NT version with subject''s actual OS build if known. | Source: slack | Pivot if positive: iPhone downloads from off-network IP = highest priority for AXIOM. File IDs for forensic retrieval'
   pq: |-
-    serverHost='slack' actor.user.email='{{entity}}' action in ('file_downloaded','file_shared','file_uploaded','file_deleted')
+    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action in ('file_downloaded','file_shared','file_uploaded','file_deleted')
     | filter !(context.ua contains:anycase 'Windows NT 10.0.26100')
     | filter !(context.ua contains:anycase 'OKTA')
     | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
@@ -347,7 +347,7 @@ queries:
   title: Slack File Uploads
   notes: 'What files did the user upload to Slack? Uploading sensitive docs to Slack = potential staging for sharing. | Source: slack | Pivot if positive: Sensitive filename → channel ID → resolve channel name with Slack admin. Multiple uploads = 5+ = deliberate sharing'
   pq: |-
-    serverHost='slack' actor.user.email='{{entity}}' action='file_uploaded'
+    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='file_uploaded'
     | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -357,7 +357,7 @@ queries:
   title: Slack Channel Joins — Burst Pattern
   notes: 'Did the user join many channels in a short period? Burst joins before departure = accessing file history. | Source: slack | Pivot if positive: Channel joined → file_downloaded from that channel in same day window?'
   pq: |-
-    serverHost='slack' actor.user.email='{{entity}}' action='user_joined_channel'
+    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='user_joined_channel'
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
     | limit 2000
@@ -366,7 +366,7 @@ queries:
   title: Slack Activity by Device Type
   notes: 'What device types has the user accessed Slack from? Shows corporate vs personal device breakdown. | Source: slack | Pivot if positive: Mobile device present → SLK-02 for mobile-only downloads'
   pq: |-
-    serverHost='slack' actor.user.email='{{entity}}'
+    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}'
     | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
     | filter !(context.ua contains:anycase 'Scio Search')
     | let DeviceType=context.ua contains:anycase 'iphone' ? 'iPhone' : context.ua contains:anycase 'android' ? 'Android' : context.ua contains:anycase 'AppleSilicon Sonic Slack' ? 'macOS Desktop App' : context.ua contains:anycase 'Sonic Slack' ? 'Windows Desktop App' : context.ua contains:anycase("Windows NT") ? 'Windows Browser' : context.ua contains:anycase("Macintosh") ? 'macOS Browser' : 'Other/API'
@@ -376,7 +376,7 @@ queries:
   title: ZIA App Summary — Top Destinations
   notes: 'What apps and sites did the user access most? Count by app name. Identifies cloud storage, AI tools, personal email, unusual destinations. | Source: zia | Pivot if positive: Dropbox/iCloud present → ZIA-03 for URL-level detail. ETRADE high volume → note for compliance review'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | group Events=count(), UploadBytes=sum(event.outbytes), DownloadBytes=sum(event.inbytes) by App=event.appname
     | sort -Events
     | limit 100
@@ -384,7 +384,7 @@ queries:
   title: ZIA Upload Volume by Destination
   notes: 'Which destinations received the most data from this user? Sorted by bytes out. Identifies large exfil sessions. | Source: zia | Pivot if positive: Unresolved hostname → ZIA-03 for full URLs. Correlate timestamp with GWS downloads in same window'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | let BytesOut=(event.outbytes || 0)
     | filter BytesOut > 0
     | group TotalUploadMB=sum(BytesOut)/1048576, Sessions=count(), LastSeen.timestamp=max(timestamp || event.time || sca:ingestTime) by Domain=event.hostname
@@ -394,7 +394,7 @@ queries:
   title: ZIA Cloud Storage / Upload Keyword URL Detail
   notes: 'Did the user access Dropbox, Box, iCloud, Mega, WeTransfer, or other personal cloud storage? URL-level evidence. | Source: zia | Pivot if positive: POST/PUT method + high UploadBytes + sensitive filename in URL = confirmed upload'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | filter event.url contains:anycase ('dropbox.com') OR event.url contains:anycase ('box.com') OR event.url contains:anycase ('icloud.com') OR event.url contains:anycase ('mega.nz') OR event.url contains:anycase ('wetransfer.com') OR event.url contains:anycase ('sharefile.com') OR event.url contains:anycase ('onedrive.live.com') OR event.appname in:anycase ('Dropbox','Box','MEGA','WeTransfer','iCloud')
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -404,7 +404,7 @@ queries:
   title: ZIA Yahoo Mail / Personal Email URL Detail
   notes: 'What actions did the user take in Yahoo Mail? Look for send/compose/attachment URLs. | Source: zia | Pivot if positive: POST to mail.yahoo.com/ws/v3/batch with high UploadBytes = potential email send with attachment'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | filter event.hostname contains:anycase ('mail.yahoo.com') OR event.hostname contains:anycase ('data.mail.yahoo.com') OR event.hostname contains:anycase ('gam.mail.yahoosandbox.net')
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -414,7 +414,7 @@ queries:
   title: ZIA AI Tool Activity
   notes: 'Did the user access Claude, ChatGPT, Copilot, Gemini, or other AI tools from the corporate device? | Source: zia | Pivot if positive: High upload bytes to AI tools → Prompt Security tab for content inspection'
   pq: |-
-    serverHost='zia' event.user='{{entity}}'
+    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
     | filter event.appname in:anycase ('Claude','ChatGPT','Microsoft Copilot','Google Gemini','Perplexity','Anthropic') OR event.hostname contains:anycase ('claude.ai') OR event.hostname contains:anycase ('chat.openai.com') OR event.hostname contains:anycase ('copilot.microsoft.com') OR event.hostname contains:anycase ('useast.prompt.security')
     | let ts=(timestamp || event.time || sca:ingestTime)
     | sort -ts
@@ -434,7 +434,7 @@ queries:
   title: Salesforce Realtime Login Activity
   notes: 'Where and how did the user authenticate to Salesforce? | Source: salesforce-realtime | Pivot if positive: Pivot LoginKey/SessionKey to SFD-07.'
   pq: |-
-    serverHost='salesforce-realtime' detail-type='LoginEventStream'
+    serverHost='{{src_salesforce_realtime|salesforce-realtime}}' detail-type='LoginEventStream'
     | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
     | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Username=detail.payload.Username, UserId=detail.payload.UserId, LoginType=detail.payload.LoginType, App=detail.payload.Application, Browser=detail.payload.Browser, Platform=detail.payload.Platform, IP=detail.payload.SourceIp, Country=detail.payload.Country, City=detail.payload.City, Status=detail.payload.Status, LoginKey=detail.payload.LoginKey, SessionKey=detail.payload.SessionKey
@@ -444,7 +444,7 @@ queries:
   title: Salesforce Report / Row Volume Activity
   notes: 'Did the user run reports or high-row-return activity? | Source: salesforce-realtime | Pivot if positive: Large RowsProcessed/RowsReturned -> review report name/query and business justification.'
   pq: |-
-    serverHost='salesforce-realtime'
+    serverHost='{{src_salesforce_realtime|salesforce-realtime}}'
     | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
     | filter detail-type contains:anycase('Report') OR detail.payload.ReportId != null OR detail.payload.RowsProcessed != null OR detail.payload.RowsReturned != null
     | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
@@ -455,7 +455,7 @@ queries:
   title: Salesforce SOQL / Queried Entities
   notes: 'What objects/entities did the user or connected app query? | Source: salesforce-realtime | Pivot if positive: Pivot ConnectedAppId, Query, or LoginKey.'
   pq: |-
-    serverHost='salesforce-realtime'
+    serverHost='{{src_salesforce_realtime|salesforce-realtime}}'
     | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
     | filter detail.payload.Query != null OR detail.payload.QueriedEntities != null OR detail.payload.Operation != null
     | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
@@ -466,7 +466,7 @@ queries:
   title: Salesforce Event Monitoring API / URI Activity
   notes: 'Correlate Salesforce EventLogFile style activity using USER_ID/SESSION_KEY/LOGIN_KEY. | Source: salesforce_event | Pivot if positive: Use SESSION_KEY and LOGIN_KEY for same-session timeline.'
   pq: |-
-    serverHost='salesforce_event'
+    serverHost='{{src_salesforce_event|salesforce_event}}'
     | filter USER_ID='{{sf_user_id}}' OR USER_ID_DERIVED='{{sf_user_id}}' OR username contains:anycase('{{username}}')
     | let ts=(TIMESTAMP_DERIVED || TIMESTAMP || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=EVENT_TYPE, UserId=USER_ID, DerivedUser=USER_ID_DERIVED, ClientIP=CLIENT_IP, ClientName=CLIENT_NAME, ConnectedApp=CONNECTED_APP_ID, Method=HTTP_METHOD, Entity=ENTITY_NAME, URI=URI, Query=QUERY, Status=REQUEST_STATUS, LoginKey=LOGIN_KEY, SessionKey=SESSION_KEY, UserAgent=USER_AGENT
@@ -476,7 +476,7 @@ queries:
   title: Salesforce Setup Audit Changes
   notes: 'Did the user make setup/security/config changes? | Source: salesforce_audit | Pivot if positive: Privilege changes -> SFD-09 and Okta/admin correlation.'
   pq: |-
-    serverHost='salesforce_audit'
+    serverHost='{{src_salesforce_audit|salesforce_audit}}'
     | filter username contains:anycase('{{username}}') OR CreatedById='{{sf_user_id}}' OR DelegateUser contains:anycase('{{username}}')
     | let ts=(CreatedDate || SystemModstamp || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Username=username, CreatedById=CreatedById, Action=Action, Section=Section, Display=Display, DelegateUser=DelegateUser, ResponsibleNamespacePrefix=ResponsibleNamespacePrefix
@@ -487,7 +487,7 @@ queries:
   notes: 'Reconstruct all Salesforce activity for a LoginKey/SessionKey across realtime + event feeds. | Source: salesforce-realtime, salesforce_event | Pivot if positive: Export raw results as session evidence.'
   pq: |-
     serverHost in ('salesforce-realtime','salesforce_event')
-    | filter detail.payload.LoginKey='%LOGIN_KEY%' OR detail.payload.SessionKey='%SESSION_KEY%' OR LOGIN_KEY='%LOGIN_KEY%' OR SESSION_KEY='%SESSION_KEY%'
+    | filter detail.payload.LoginKey='{{login_key}}' OR detail.payload.SessionKey='{{session}}' OR LOGIN_KEY='{{login_key}}' OR SESSION_KEY='{{session}}'
     | let ts=(detail.payload.EventDate || TIMESTAMP_DERIVED || time || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, DetailType=detail-type, EventType=EVENT_TYPE, Username=detail.payload.Username, UserId=detail.payload.UserId, Operation=detail.payload.Operation, EventName=detail.payload.Name, Entity=ENTITY_NAME, URI=URI, IP=detail.payload.SourceIp, ClientIP=CLIENT_IP, Query=detail.payload.Query
     | sort Time
@@ -496,7 +496,7 @@ queries:
   title: Salesforce File / Content Activity
   notes: 'Look for content/file actions, versions, and content size. | Source: salesforce-realtime | Pivot if positive: Correlate with ZIA/endpoint uploads and report events.'
   pq: |-
-    serverHost='salesforce-realtime'
+    serverHost='{{src_salesforce_realtime|salesforce-realtime}}'
     | filter detail.payload.Username contains:anycase('{{entity}}') OR detail.payload.UserId='{{sf_user_id}}'
     | filter detail.payload.FileAction != null OR detail.payload.ContentSize != null OR detail.payload.FileType != null OR detail-type contains:anycase('File')
     | let ts=(detail.payload.EventDate || time || timestamp || sca:ingestTime)
@@ -507,7 +507,7 @@ queries:
   title: Salesforce Privilege / Connected App Changes
   notes: 'Find security-sensitive setup changes involving permissions, profiles, roles, sessions, or connected apps. | Source: salesforce_audit | Pivot if positive: Correlate with Okta, IP, and approver/change-ticket evidence.'
   pq: |-
-    serverHost='salesforce_audit'
+    serverHost='{{src_salesforce_audit|salesforce_audit}}'
     | filter (username contains:anycase('{{username}}') OR CreatedById='{{sf_user_id}}' OR DelegateUser contains:anycase('{{username}}'))
     | filter Action contains:anycase('permission','profile','role','user','login','session','token','connected','app') OR Section contains:anycase('security','users','permission','profile','session','login') OR Display contains:anycase('Permission','Profile','Role','Connected App','Session')
     | let ts=(CreatedDate || SystemModstamp || timestamp || sca:ingestTime)
@@ -518,7 +518,7 @@ queries:
   title: Azure Sign-In Activity — Location and App
   notes: 'What Azure/M365 apps did the user access and from where? Covers Teams, OneDrive, SharePoint. | Source: Azure | Pivot if positive: OneDrive SyncEngine = standard laptop sync. New app or new country → investigate'
   pq: |-
-    serverHost='Azure' UserPrincipalName='{{entity}}'
+    serverHost='{{src_azure|Azure}}' UserPrincipalName='{{entity}}'
     | let ts=(timestamp || createdDateTime || sca:ingestTime)
     | sort -ts
     | limit 5000
@@ -527,7 +527,7 @@ queries:
   title: Azure OneDrive — Sharing and Downloads
   notes: 'Did the user share, download, or create anonymous links in OneDrive? | Source: onedrive | Pivot if positive: Anonymous link created + sensitive file = high concern. Unmanaged device download = investigate'
   pq: |-
-    serverHost='onedrive' userPrincipalName='{{entity}}'
+    serverHost='{{src_onedrive|onedrive}}' userPrincipalName='{{entity}}'
     | filter operation matches:anycase ('SharingSet|SharingInvitationCreated|AnonymousLinkCreated|FileDownloaded|FileSyncDownloaded|FileDeleted')
     | let ts=(timestamp || createdDateTime || sca:ingestTime)
     | sort -ts
@@ -537,7 +537,7 @@ queries:
   title: Prompt Security — All Activity
   notes: 'What AI tool activity did the user have via the corporate Prompt Security gateway? | Source: prompt-security | Pivot if positive: text_action events with high latency or violations → PSC-02'
   pq: |-
-    serverHost='prompt-security' log.user='{{entity}}'
+    serverHost='{{src_prompt_security|prompt-security}}' log.user='{{entity}}'
     | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime)
     | sort -ts
     | limit 2000
@@ -546,7 +546,7 @@ queries:
   title: Prompt Security — Data Laundering / Violations
   notes: 'Did the user send secrets, sensitive data, or policy-violating content to AI tools? | Source: prompt-security | Pivot if positive: Secret findings + departing user = escalate. Use ConvID to retrieve full conversation if needed'
   pq: |-
-    serverHost='prompt-security' log.user='{{entity}}'
+    serverHost='{{src_prompt_security|prompt-security}}' log.user='{{entity}}'
     | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime)
     | let Violations=string(log.violations)
     | let Secrets=string(log.violationFindingsDetails.Secrets)
@@ -560,7 +560,7 @@ queries:
   title: Navan Travel Bookings
   notes: 'What business travel did the user book? Corroborates geo anomalies in Okta/ZPA. | Source: navan-travel-bookings | Pivot if positive: Trip destination + dates → Okta location in same window for corroboration'
   pq: |-
-    serverHost='navan-travel-bookings'
+    serverHost='{{src_navan_travel_bookings|navan-travel-bookings}}'
     | filter passengers.person.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{username}}') OR booker.email contains:anycase('{{entity}}')
     | let ts=(timestamp || created || lastModified || sca:ingestTime)
     | sort -ts
@@ -618,7 +618,7 @@ queries:
   title: Atlassian API Token / Admin Changes
   notes: 'Was access, token, or admin configuration changed? | Source: atlassian-cloud-enterprise | Pivot if positive: Okta admin events, PagerDuty/Snyk admin changes'
   pq: |-
-    serverHost='atlassian-cloud-enterprise'
+    serverHost='{{src_atlassian_cloud_enterprise|atlassian-cloud-enterprise}}'
     | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}')
     | filter action contains:anycase('token') OR action contains:anycase('admin') OR action contains:anycase('group') OR action contains:anycase('permission')
     | sort -timestamp
@@ -666,7 +666,7 @@ queries:
   title: Box Downloads / Sharing
   notes: 'Box downloads, shared links, collaboration invites. | Source: box | Pivot if positive: Exclude service_name=Box Drive/Sync then corroborate with endpoint/ZIA'
   pq: |-
-    serverHost='box'
+    serverHost='{{src_box|box}}'
     | filter created_by.login contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}')
     | filter event_type contains:anycase('download') OR event_type contains:anycase('share') OR event_type contains:anycase('collaboration') OR event_type contains:anycase('link')
     | sort -timestamp
@@ -676,7 +676,7 @@ queries:
   title: OneDrive / SharePoint Activity
   notes: 'Any M365 storage activity for this user? | Source: onedrive | Pivot if positive: Storage and ZIA/Endpoint corroboration'
   pq: |-
-    serverHost='onedrive'
+    serverHost='{{src_onedrive|onedrive}}'
     | filter actor.email contains:anycase('{{entity}}') OR user contains:anycase('{{entity}}')
     | filter event.name contains:anycase('download') OR event.name contains:anycase('share') OR event.name contains:anycase('sync') OR event.name contains:anycase('access')
     | sort -timestamp
@@ -686,7 +686,7 @@ queries:
   title: 1Password Sign-ins and Item Usage
   notes: 'Did the user access secrets or sign in from unusual clients/IPs? | Source: 1password | Pivot if positive: Endpoint process/user and Okta session at same time'
   pq: |-
-    serverHost='1password'
+    serverHost='{{src_1password|1password}}'
     | filter target_user.email contains:anycase('{{entity}}') OR user.email contains:anycase('{{entity}}')
     | sort -timestamp
     | limit 2000
@@ -704,7 +704,7 @@ queries:
   title: Snyk Service Account / Token / Role Changes
   notes: 'Any Snyk token, service account, project ignore, or role change activity? | Source: snyk | Pivot if positive: GitHub repo and token activity'
   pq: |-
-    serverHost='snyk'
+    serverHost='{{src_snyk|snyk}}'
     | filter content.email contains:anycase('{{entity}}') OR user_id contains:anycase('{{username}}') OR content contains:anycase('{{username}}')
     | filter event contains:anycase('service_account') OR event contains:anycase('role') OR event contains:anycase('token') OR event contains:anycase('ignore') OR event contains:anycase('integration')
     | sort -timestamp
@@ -723,7 +723,7 @@ queries:
   title: JumpCloud User / Device Activity
   notes: 'JumpCloud auth, device, or directory events for user. | Source: jumpcloud | Pivot if positive: Device identity mapping and endpoint timeline'
   pq: |-
-    serverHost='jumpcloud'
+    serverHost='{{src_jumpcloud|jumpcloud}}'
     | filter initiated_by.email contains:anycase('{{entity}}') OR initiated_by.username contains:anycase('{{username}}') OR useragent contains:anycase('{{username}}')
     | sort -timestamp
     | limit 2000
@@ -750,7 +750,7 @@ queries:
   title: DNS Queries by Host/IP
   notes: 'DNS lookups from a host/IP around investigation window. | Source: dns-query-logs | Pivot if positive: VPC Flow / Endpoint process / ZIA web'
   pq: |-
-    serverHost='dns-query-logs'
+    serverHost='{{src_dns_query_logs|dns-query-logs}}'
     | filter srcaddr == '{{ip}}' OR event.src_ip == '{{ip}}' OR k8s_node == '{{hostname}}' OR question contains:anycase('{{hostname}}')
     | group Count=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp) by Question=question, SourceIP=srcaddr
     | sort -Count
@@ -777,7 +777,7 @@ queries:
   title: Figma Export / Link Changes
   notes: 'Figma file exports, image downloads, link changes, token activity. | Source: figma | Pivot if positive: ZIA, endpoint downloads, external sharing'
   pq: |-
-    serverHost='figma'
+    serverHost='{{src_figma|figma}}'
     | filter actor.email contains:anycase('{{entity}}')
     | filter action.type contains:anycase('export') OR action.type contains:anycase('download') OR action.type contains:anycase('link') OR action.type contains:anycase('access_token')
     | sort -timestamp
@@ -848,7 +848,7 @@ queries:
   title: Session -> Timeline
   notes: 'Reconstruct a web/app session using known session keys. | Source: Okta, Salesforce, Slack, Box'
   pq: |-
-    session='{{session}}' OR authenticationContext.externalSessionId='{{session}}' OR detail.payload.SessionKey='{{session}}' OR SESSION_KEY='{{session}}' OR detail.payload.LoginKey='<LOGIN_KEY>' OR LOGIN_KEY='<LOGIN_KEY>'
+    session='{{session}}' OR authenticationContext.externalSessionId='{{session}}' OR detail.payload.SessionKey='{{session}}' OR SESSION_KEY='{{session}}' OR detail.payload.LoginKey='{{login_key}}' OR LOGIN_KEY='{{login_key}}'
     | columns timestamp, serverHost, actor.email, detail.payload.Username, event.name, event.type, action, detail-type, ipAddress, detail.payload.SourceIp, CLIENT_IP
     | sort timestamp
     | limit 10000
@@ -856,8 +856,8 @@ queries:
   title: Domain / URL -> Egress
   notes: 'Review web activity to personal cloud/AI/paste sites. | Source: ZIA'
   pq: |-
-    serverHost='zia'
-    | filter event.hostname contains:anycase('<DOMAIN>') OR event.url contains:anycase('<DOMAIN>')
+    serverHost='{{src_zia|zia}}'
+    | filter event.hostname contains:anycase('{{domain}}') OR event.url contains:anycase('{{domain}}')
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
     | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,event.requestmethod,outB,event.ClientIP,event.useragent
     | sort -timestamp
@@ -866,7 +866,7 @@ queries:
   title: File Name -> Activity
   notes: 'Find downloads/uploads/shares for a filename/title. | Source: Google WS, Slack, Box, EDR'
   pq: |-
-    message contains:anycase('<FILE_OR_TITLE>') OR event.doc_title contains:anycase('<FILE_OR_TITLE>') OR entity.file.name contains:anycase('<FILE_OR_TITLE>') OR tgt.file.path contains:anycase('<FILE_OR_TITLE>')
+    message contains:anycase('{{file_or_title}}') OR event.doc_title contains:anycase('{{file_or_title}}') OR entity.file.name contains:anycase('{{file_or_title}}') OR tgt.file.path contains:anycase('{{file_or_title}}')
     | columns timestamp, serverHost, actor.email, user, event.name, action, event.doc_title, entity.file.name, tgt.file.path, ipAddress
     | sort -timestamp
     | limit 5000
@@ -874,7 +874,7 @@ queries:
   title: Salesforce UserId -> Activity
   notes: 'Salesforce often needs UserId instead of email. | Source: salesforce_event'
   pq: |-
-    serverHost='salesforce_event'
+    serverHost='{{src_salesforce_event|salesforce_event}}'
     | filter USER_ID='{{sf_user_id}}' OR USER_ID_DERIVED='{{sf_user_id}}' OR username contains:anycase('{{username}}')
     | let ts=(TIMESTAMP_DERIVED || TIMESTAMP || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=EVENT_TYPE, UserId=USER_ID, DerivedUser=USER_ID_DERIVED, ClientIP=CLIENT_IP, ClientName=CLIENT_NAME, ConnectedApp=CONNECTED_APP_ID, Method=HTTP_METHOD, Entity=ENTITY_NAME, URI=URI, Query=QUERY, Status=REQUEST_STATUS, LoginKey=LOGIN_KEY, SessionKey=SESSION_KEY, UserAgent=USER_AGENT
@@ -885,7 +885,7 @@ queries:
   notes: 'Tie login to report/query/file activity. | Source: salesforce-realtime, salesforce_event'
   pq: |-
     serverHost in ('salesforce-realtime','salesforce_event')
-    | filter detail.payload.LoginKey='%LOGIN_KEY%' OR detail.payload.SessionKey='%SESSION_KEY%' OR LOGIN_KEY='%LOGIN_KEY%' OR SESSION_KEY='%SESSION_KEY%'
+    | filter detail.payload.LoginKey='{{login_key}}' OR detail.payload.SessionKey='{{session}}' OR LOGIN_KEY='{{login_key}}' OR SESSION_KEY='{{session}}'
     | let ts=(detail.payload.EventDate || TIMESTAMP_DERIVED || time || timestamp || sca:ingestTime)
     | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, DetailType=detail-type, EventType=EVENT_TYPE, Username=detail.payload.Username, UserId=detail.payload.UserId, Operation=detail.payload.Operation, EventName=detail.payload.Name, Entity=ENTITY_NAME, URI=URI, IP=detail.payload.SourceIp, ClientIP=CLIENT_IP, Query=detail.payload.Query
     | sort Time
@@ -905,7 +905,7 @@ queries:
   title: Slack File Activity
   notes: 'Downloads/uploads/shares by a user. | Source: slack'
   pq: |-
-    serverHost='slack' actor.user.email contains:anycase '{{entity}}'
+    serverHost='{{src_slack|slack}}' actor.user.email contains:anycase '{{entity}}'
       action in ('file_downloaded','file_uploaded','file_shared','file_public_link_created')
     | columns timestamp, action, actor.user.email, entity.file.name, entity.file.filetype, entity.channel.name, context.ip_address, context.ua
     | sort -timestamp
@@ -914,7 +914,7 @@ queries:
   title: ZIA Large Uploads
   notes: 'Find large outbound web uploads. | Source: zia'
   pq: |-
-    serverHost='zia'
+    serverHost='{{src_zia|zia}}'
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
     | filter outB > 50000000
     | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,event.requestmethod,outB,event.ClientIP,event.useragent
@@ -924,7 +924,7 @@ queries:
   title: AI / Unsanctioned App Usage
   notes: 'Find high-volume AI app usage or upload volume. | Source: zia, prompt-security, anthropic-activity'
   pq: |-
-    serverHost='zia'
+    serverHost='{{src_zia|zia}}'
     | filter event.urlcategory contains:anycase('AI','ML') OR event.appname contains:anycase('AI','Claude','ChatGPT','Gemini','Perplexity','Copilot')
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
     | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname,event.action
@@ -933,7 +933,7 @@ queries:
   title: Query Cost Telemetry
   notes: 'Review query cost and columns faulted for heavy searches. | Source: scalyr-metalog'
   pq: |-
-    serverHost='scalyr-metalog' tag = 'QueryExecutive.query' user='{{entity}}'
+    serverHost='{{src_scalyr_metalog|scalyr-metalog}}' tag = 'QueryExecutive.query' user='{{entity}}'
     | group tbCovered=sum(coverBytes)/1000/1000/1000/1000, tbScanned=sum(columnFaultBytes)/1000/1000/1000/1000, cpuSeconds=sum(queryComputationCpuNs)/1000/1000/1000, tbMemoryUsed=sum(heapAllocatedBytes)/1000/1000/1000/1000, columnsQueriedPerEpoch=sum(columnsFaulted)/sum(epochsQueried) by lrqToken
     | let coverBytesPerScanBytes=tbCovered/tbScanned
     | sort -tbScanned
@@ -942,7 +942,7 @@ queries:
   title: Software Inventory by App/Tag
   notes: 'What risky or policy-relevant software exists across endpoints? Uses .timestamp aliases so SDL renders time values as dates. | Source: oplockdown | Pivot if positive: EDR process execution, ZIA, DNS/PANW, user coverage'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | group
         Endpoints=estimate_distinct(endpoint.name),
         Users=estimate_distinct(owner),
@@ -955,7 +955,7 @@ queries:
   title: Newly Observed Software by Endpoint
   notes: 'Which apps first appeared recently on a user or endpoint? | Source: oplockdown | Pivot if positive: EDR process creation by app name; endpoint timeline'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | group
         FirstRecord.timestamp=min(timestamp),
         LastRecord.timestamp=max(timestamp),
@@ -967,7 +967,7 @@ queries:
   title: High-Risk Software Categories
   notes: 'Show VPN, RemoteManagement, AI, Filesharing, P2P and Games software by scope. | Source: oplockdown | Pivot if positive: OPL-04 endpoint inventory; EDR correlation'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | filter tag in ('VPN','RemoteManagement','AI-MISUSE','AI-IDE','Filesharing','Peer-To-Peer','Games')
     | group
         Endpoints=estimate_distinct(endpoint.name),
@@ -981,7 +981,7 @@ queries:
   title: Endpoint Software Inventory
   notes: 'For one host, list all known software and tags. | Source: oplockdown | Pivot if positive: EDR process, network, USB, ZIA'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | filter endpoint.name contains:anycase('{{hostname}}')
     | group
         FirstRecord.timestamp=min(timestamp),
@@ -993,8 +993,8 @@ queries:
   title: Software by User / Owner
   notes: 'What policy-relevant apps are mapped to a subject owner? | Source: oplockdown | Pivot if positive: User coverage, endpoint EDR, ZIA upload activity'
   pq: |-
-    serverHost='oplockdown'
-    | filter owner contains:anycase('<USER>')
+    serverHost='{{src_oplockdown|oplockdown}}'
+    | filter owner contains:anycase('{{username}}')
     | group
         Endpoints=estimate_distinct(endpoint.name),
         FirstRecord.timestamp=min(timestamp),
@@ -1007,7 +1007,7 @@ queries:
   title: Orphaned / Unknown Owner Software
   notes: 'Which high-risk apps are installed on endpoints without an owner? | Source: oplockdown | Pivot if positive: Asset inventory, EDR endpoint.name, device owner lookup'
   pq: |-
-    serverHost='oplockdown'
+    serverHost='{{src_oplockdown|oplockdown}}'
     | filter owner == '-' OR owner == null OR owner == ''
     | group
         Endpoints=estimate_distinct(endpoint.name),
@@ -1024,54 +1024,54 @@ queries:
     event.type in ('Process Creation','Process','Process Start')
     | let Proc=(process.name || src.process.name || tgt.process.name || '')
     | let Cmd=(process.cmdline || src.process.cmdline || tgt.process.cmdline || '')
-    | filter Proc contains:anycase('<APP_NAME>') OR Cmd contains:anycase('<APP_NAME>')
+    | filter Proc contains:anycase('{{app_name}}') OR Cmd contains:anycase('{{app_name}}')
     | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(user.name || src.process.user), Proc, Cmd
     | sort -timestamp
     | limit 2000
 - id: zia-ex-01
   title: ZIA Events by Source Type
   notes: 'Baseline ZIA volumes by sourcetype. | Source: zia | Pivot if positive: ZIA raw activity'
-  pq: serverHost='zia' | group count=count() by timestamp=timebucket('1h'), sourcetype | transpose sourcetype
+  pq: serverHost='{{src_zia|zia}}' | group count=count() by timestamp=timebucket('1h'), sourcetype | transpose sourcetype
 - id: zia-ex-02
   title: Allowed vs Blocked Web Activity
   notes: 'Control outcome trend over time. | Source: zia | Pivot if positive: Blocked vs Allowed / Control Gaps'
-  pq: serverHost='zia' sourcetype='zscalernss-web' | group count=count() by timestamp=timebucket('1h'), event.action | transpose event.action
+  pq: serverHost='{{src_zia|zia}}' sourcetype='zscalernss-web' | group count=count() by timestamp=timebucket('1h'), event.action | transpose event.action
 - id: zia-up-01
   title: Large Uploads >50MB
   notes: 'Find single-event large uploads. | Source: zia | Pivot if positive: Endpoint staging, destination risk'
-  pq: serverHost='zia' | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB > 50000000 | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,outB | sort -outB
+  pq: serverHost='{{src_zia|zia}}' | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB > 50000000 | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,outB | sort -outB
 - id: zia-up-02
   title: Upload Destinations by User
   notes: 'Summarize upload volume by user/destination. | Source: zia | Pivot if positive: User risk rollup; raw ZIA'
-  pq: serverHost='zia' | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB > 10000000 | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname | sort -upload_bytes
+  pq: serverHost='{{src_zia|zia}}' | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB > 10000000 | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname | sort -upload_bytes
 - id: zia-up-03
   title: After-Hours Upload Activity
   notes: 'Find uploads outside expected hours. | Source: zia | Pivot if positive: Workday/HR context, endpoint staging'
-  pq: serverHost='zia' | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let hr=hourofday(timestamp) | filter outB > 5000000 AND (hr < 6 OR hr > 20) | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname | sort -upload_bytes
+  pq: serverHost='{{src_zia|zia}}' | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let hr=hourofday(timestamp) | filter outB > 5000000 AND (hr < 6 OR hr > 20) | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname | sort -upload_bytes
 - id: zia-ai-01
   title: AI Application Usage by User
   notes: 'Find ZIA uploads/events to common AI tools. | Source: zia | Pivot if positive: Prompt Security, OpLockdown AI apps'
-  pq: serverHost='zia' | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count() by event.user,event.appname | sort -upload_bytes
+  pq: serverHost='{{src_zia|zia}}' | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count() by event.user,event.appname | sort -upload_bytes
 - id: zia-ai-02
   title: AI Domains by Upload Volume
   notes: 'Rank AI domains by upload bytes. | Source: zia | Pivot if positive: Prompt Security violations'
-  pq: serverHost='zia' | filter event.hostname contains:anycase('claude.ai','anthropic.com','codeium.com','windsurf.ai','glean.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), users=estimate_distinct(event.user), events=count() by event.hostname,event.appname | sort -upload_bytes
+  pq: serverHost='{{src_zia|zia}}' | filter event.hostname contains:anycase('claude.ai','anthropic.com','codeium.com','windsurf.ai','glean.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), users=estimate_distinct(event.user), events=count() by event.hostname,event.appname | sort -upload_bytes
 - id: zia-sh-01
   title: High-Risk Shadow IT Uploads
   notes: 'Find uploads to personal cloud, transfer, chat, and public sharing sites. | Source: zia | Pivot if positive: Endpoint staging, policy review'
-  pq: serverHost='zia' | filter event.hostname contains:anycase('icloud','wetransfer','swisstransfer','mega','dropbox','box','telegram','discord','signal','whatsapp','archive.org','mediafire') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname,event.action | sort -upload_bytes
+  pq: serverHost='{{src_zia|zia}}' | filter event.hostname contains:anycase('icloud','wetransfer','swisstransfer','mega','dropbox','box','telegram','discord','signal','whatsapp','archive.org','mediafire') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname,event.action | sort -upload_bytes
 - id: zia-sh-02
   title: Personal Webmail Uploads
   notes: 'Find potentially uploaded attachments to personal mail. | Source: zia | Pivot if positive: Endpoint staging; DLP'
-  pq: serverHost='zia' | filter event.hostname contains:anycase('gmail','outlook.live','hotmail','yahoo','protonmail') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB > 1000000 | columns timestamp,event.user,event.hostname,event.url,event.appname,event.action,outB | sort -outB
+  pq: serverHost='{{src_zia|zia}}' | filter event.hostname contains:anycase('gmail','outlook.live','hotmail','yahoo','protonmail') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB > 1000000 | columns timestamp,event.user,event.hostname,event.url,event.appname,event.action,outB | sort -outB
 - id: zia-ic-01
   title: Potential iCloud Uploads
   notes: 'Hunt for iCloud upload-like traffic. | Source: zia | Pivot if positive: Endpoint file staging; user timeline'
-  pq: serverHost='zia' | filter event.appname='iCloud' OR event.hostname contains:anycase('icloud') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter event.requestmethod in ('POST','PUT') OR outB > 5000000 | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.requestmethod,event.action,outB | sort -outB
+  pq: serverHost='{{src_zia|zia}}' | filter event.appname='iCloud' OR event.hostname contains:anycase('icloud') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter event.requestmethod in ('POST','PUT') OR outB > 5000000 | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.requestmethod,event.action,outB | sort -outB
 - id: zia-bp-01
   title: Users with ZIA Disable Events
   notes: 'Identify users with disable events and reasons. | Source: zia_disable_reason | Pivot if positive: ZIA disable timeline; endpoint/EDR'
-  pq: serverHost='zia_disable_reason' | group events=count(), reasons=array_agg(DisableReason,20) by User | sort -events
+  pq: serverHost='{{src_zia_disable_reason|zia_disable_reason}}' | group events=count(), reasons=array_agg(DisableReason,20) by User | sort -events
 - id: zia-bp-02
   title: Disable Events + Blocked Activity Timeline
   notes: 'Correlate ZIA disables with blocked web events. | Source: zia + zia_disable_reason | Pivot if positive: User/device review'
@@ -1079,111 +1079,111 @@ queries:
 - id: zia-it-01
   title: Recommended Block Candidates
   notes: 'Rank destinations that may need policy tuning. | Source: zia | Pivot if positive: Policy owner / business justification'
-  pq: serverHost='zia' | filter event.hostname contains:anycase('swisstransfer','wetransfer','archive.org','mega','signal','telegram','icloud','mediafire') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), users=estimate_distinct(event.user), events=count() by event.hostname,event.appname,event.action | sort -upload_bytes
+  pq: serverHost='{{src_zia|zia}}' | filter event.hostname contains:anycase('swisstransfer','wetransfer','archive.org','mega','signal','telegram','icloud','mediafire') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), users=estimate_distinct(event.user), events=count() by event.hostname,event.appname,event.action | sort -upload_bytes
 - id: zia-dlp-01
   title: Potential Upload / Egress Activity
   notes: 'Counts likely upload or egress-related events using request method, URL keywords, or outbound byte volume. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group count()
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group count()
 - id: zia-dlp-02
   title: Unique Users with Upload-Like Activity
   notes: 'Distinct users associated with potential upload or outbound transfer behavior. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group users=estimate_distinct(event.user)
+  pq: serverHost='{{src_zia|zia}}' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group users=estimate_distinct(event.user)
 - id: zia-dlp-03
   title: Blocked / Reset Upload Attempts
   notes: 'Upload-like events that were not cleanly allowed, useful for spotting attempted policy bypass or risky user behavior. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND !(event.action in ('Allow','Allowed','ALLOW')) | group count()
+  pq: serverHost='{{src_zia|zia}}' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND !(event.action in ('Allow','Allowed','ALLOW')) | group count()
 - id: zia-dlp-04
   title: Total Outbound Bytes (All ZIA)
   notes: 'Overall outbound volume for scoped data. Use with upload panels to identify whether suspicious activity is part of broader heavy egress. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | group total_out=sum(event.outbytes || ZENTotalBytesTxClient || 0)
+  pq: serverHost='{{src_zia|zia}}' | group total_out=sum(event.outbytes || ZENTotalBytesTxClient || 0)
 - id: zia-dlp-05
   title: Potential Upload Activity Over Time
   notes: 'Daily trend of likely upload or exfil-related traffic. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group events=count(), users=estimate_distinct(event.user) by timestamp=timebucket(ts,'1d') | sort -timestamp
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group events=count(), users=estimate_distinct(event.user) by timestamp=timebucket(ts,'1d') | sort -timestamp
 - id: zia-dlp-06
   title: Top Users by Outbound Upload Volume
   notes: 'Ranks users by total outbound volume on upload-like events. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group total_out=sum(outB), events=count(), destinations=estimate_distinct(event.hostname || event.url || event.dns_req) by event.user, event.deviceowner, event.devicehostname | sort -total_out | limit 500
+  pq: serverHost='{{src_zia|zia}}' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group total_out=sum(outB), events=count(), destinations=estimate_distinct(event.hostname || event.url || event.dns_req) by event.user, event.deviceowner, event.devicehostname | sort -total_out | limit 500
 - id: zia-dlp-07
   title: Raw Upload / POST Activity
   notes: 'Primary upload hunting panel. Uses HTTP methods when present, otherwise URL keywords and outbound bytes as a proxy. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let host=(event.hostname || event.url || event.dns_req || '') | let file=(event.filename || event.file_name || event.uploadedfilename || '') | let filetype=(event.filetype || event.contenttype || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | columns ts, event.user, event.deviceowner, event.devicehostname, method, url, host, event.appname, file, filetype, outB, event.action, event.rulelabel, event.urlcategory, event.destcountry | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let host=(event.hostname || event.url || event.dns_req || '') | let file=(event.filename || event.file_name || event.uploadedfilename || '') | let filetype=(event.filetype || event.contenttype || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | columns ts, event.user, event.deviceowner, event.devicehostname, method, url, host, event.appname, file, filetype, outB, event.action, event.rulelabel, event.urlcategory, event.destcountry | sort -ts | limit 5000
 - id: zia-dlp-08
   title: Top Upload Destinations
   notes: 'Most common upload destinations by event count and outbound volume. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let method=(event.requestmethod || event.method || '') | let host=(event.hostname || event.url || event.dns_req || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group events=count(), total_out=sum(outB), users=estimate_distinct(event.user) by host, event.appname, event.urlcategory | sort -total_out | limit 500
+  pq: serverHost='{{src_zia|zia}}' | let method=(event.requestmethod || event.method || '') | let host=(event.hostname || event.url || event.dns_req || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group events=count(), total_out=sum(outB), users=estimate_distinct(event.user) by host, event.appname, event.urlcategory | sort -total_out | limit 500
 - id: zia-dlp-09
   title: Suspicious File Types / Extensions
   notes: 'Highlights archive, mail, database, and bulk-transfer file types when available in logs. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let fname=(event.filename || event.file_name || event.uploadedfilename || '') | let ftype=(event.filetype || event.contenttype || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let suspicious=(fname contains:anycase('.zip','.rar','.7z','.pst','.mbox','.sql','.db','.bak','.tar','.gz','.tgz','.csv','.xlsx','.docx','.pdf') OR ftype contains:anycase('zip','rar','7z','pst','octet-stream')) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND suspicious | columns ts, event.user, event.deviceowner, event.devicehostname, fname, ftype, outB, url, event.appname, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let fname=(event.filename || event.file_name || event.uploadedfilename || '') | let ftype=(event.filetype || event.contenttype || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let suspicious=(fname contains:anycase('.zip','.rar','.7z','.pst','.mbox','.sql','.db','.bak','.tar','.gz','.tgz','.csv','.xlsx','.docx','.pdf') OR ftype contains:anycase('zip','rar','7z','pst','octet-stream')) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND suspicious | columns ts, event.user, event.deviceowner, event.devicehostname, fname, ftype, outB, url, event.appname, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-10
   title: Personal Cloud Storage
   notes: 'Uploads or traffic to personal cloud storage services. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('drive.google.com','dropbox.com','dropboxapi.com','icloud.com','mega.nz','mediafire.com','box.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('drive.google.com','dropbox.com','dropboxapi.com','icloud.com','mega.nz','mediafire.com','box.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-11
   title: File Sharing Services
   notes: 'Traffic to common file sharing and transfer services. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('wetransfer.com','mega.nz','mediafire.com','sendspace.com','transfernow.net','gofile.io','file.io','dropbox.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('wetransfer.com','mega.nz','mediafire.com','sendspace.com','transfernow.net','gofile.io','file.io','dropbox.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-12
   title: Source Code Repositories
   notes: 'Traffic to GitHub, GitLab, Bitbucket and similar developer platforms that can be used for IP exfiltration. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('github.com','githubusercontent.com','gitlab.com','bitbucket.org') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('github.com','githubusercontent.com','gitlab.com','bitbucket.org') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-13
   title: Paste / Public Text Dump Sites
   notes: 'Small but high-risk leakage path for credentials, tokens, snippets, and customer data. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('pastebin.com','gist.github.com','ghostbin.com','paste.ee','rentry.co','dpaste.com','hastebin.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('pastebin.com','gist.github.com','ghostbin.com','paste.ee','rentry.co','dpaste.com','hastebin.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-14
   title: Large Uploads
   notes: 'Single-event large uploads. Threshold can be tuned; starting point is 50 MB. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB >= 50000000 | columns ts, event.user, event.deviceowner, event.devicehostname, event.hostname, event.url, event.appname, outB, event.action, event.rulelabel, event.destcountry | sort -outB | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter outB >= 50000000 | columns ts, event.user, event.deviceowner, event.devicehostname, event.hostname, event.url, event.appname, outB, event.action, event.rulelabel, event.destcountry | sort -outB | limit 5000
 - id: zia-dlp-15
   title: High Frequency Uploads in Short Window
   notes: 'Potential staging or chunked exfil behavior. Looks for repeated upload-like events in 15-minute windows. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group events=count(), total_out=sum(outB), destinations=estimate_distinct(event.hostname || event.url || event.dns_req) by bucket=timebucket(ts,'15m'), event.user, event.devicehostname | filter events >= 10 | sort -total_out | limit 1000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload | group events=count(), total_out=sum(outB), destinations=estimate_distinct(event.hostname || event.url || event.dns_req) by bucket=timebucket(ts,'15m'), event.user, event.devicehostname | filter events >= 10 | sort -total_out | limit 1000
 - id: zia-dlp-16
   title: After Hours Upload Activity
   notes: 'Upload-like activity outside standard business hours. Adjust hours as needed for your org. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let hour=hourofday(ts) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND (hour < 7 OR hour > 19) | columns ts, event.user, event.deviceowner, event.devicehostname, event.hostname, event.url, event.appname, outB, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let hour=hourofday(ts) | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND (hour < 7 OR hour > 19) | columns ts, event.user, event.deviceowner, event.devicehostname, event.hostname, event.url, event.appname, outB, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-17
   title: Unsanctioned / Shadow IT App Use
   notes: 'Applications with upload capability that may not be sanctioned. Review app names and categories for policy tuning. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' event.appname=* | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by event.appname, event.urlcategory | sort -total_out | limit 500
+  pq: serverHost='{{src_zia|zia}}' event.appname=* | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by event.appname, event.urlcategory | sort -total_out | limit 500
 - id: zia-dlp-18
   title: Webmail Activity
   notes: 'Traffic to personal or browser-based mail platforms that could be used for outbound attachments. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('mail.google.com','gmail.com','outlook.live.com','mail.yahoo.com','proton.me','protonmail.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('mail.google.com','gmail.com','outlook.live.com','mail.yahoo.com','proton.me','protonmail.com') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.outbytes, event.action, event.rulelabel | sort -ts | limit 5000
 - id: zia-dlp-19
   title: VPN / Proxy / Anonymizer Usage
   notes: 'Potential attempts to evade monitoring or hide destination context. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('torproject.org','protonvpn','nordvpn','expressvpn','surfshark','tunnelbear','hide.me','openvpn') OR event.urlcategory contains:anycase('anonymizer','proxy avoidance') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.action, event.rulelabel, event.destcountry | sort -ts | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('torproject.org','protonvpn','nordvpn','expressvpn','surfshark','tunnelbear','hide.me','openvpn') OR event.urlcategory contains:anycase('anonymizer','proxy avoidance') | columns ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.action, event.rulelabel, event.destcountry | sort -ts | limit 5000
 - id: zia-dlp-20
   title: New / Low Reputation / Unknown Destinations
   notes: 'A rough proxy using unknown or miscellaneous categories when true first-seen metadata is unavailable in the log stream. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | filter event.ipcat contains:anycase('unknown') OR event.urlcategory contains:anycase('unknown') OR event.urlsupercategory contains:anycase('unknown') | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by event.hostname, event.url, event.ipcat, event.urlcategory | sort -total_out | limit 500
+  pq: serverHost='{{src_zia|zia}}' | filter event.ipcat contains:anycase('unknown') OR event.urlcategory contains:anycase('unknown') OR event.urlsupercategory contains:anycase('unknown') | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by event.hostname, event.url, event.ipcat, event.urlcategory | sort -total_out | limit 500
 - id: zia-dlp-21
   title: Blocked vs Allowed by Destination
   notes: 'Shows which destinations users attempted and whether controls stopped the traffic. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by event.action, event.hostname, event.appname, event.rulelabel | sort -events | limit 500
+  pq: serverHost='{{src_zia|zia}}' | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by event.action, event.hostname, event.appname, event.rulelabel | sort -events | limit 500
 - id: zia-dlp-22
   title: Allowed High-Risk Destinations
   notes: 'Allowed traffic to destinations that often merit tighter controls or alerting. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let host=(event.hostname || event.url || event.dns_req || '') | filter event.action in ('Allow','Allowed','ALLOW') | filter host contains:anycase('wetransfer','mega','mediafire','pastebin','gist.github','dropbox','drive.google','icloud','github','gitlab','bitbucket') | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by host, event.appname, event.urlcategory, event.rulelabel | sort -total_out | limit 500
+  pq: serverHost='{{src_zia|zia}}' | let host=(event.hostname || event.url || event.dns_req || '') | filter event.action in ('Allow','Allowed','ALLOW') | filter host contains:anycase('wetransfer','mega','mediafire','pastebin','gist.github','dropbox','drive.google','icloud','github','gitlab','bitbucket') | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by host, event.appname, event.urlcategory, event.rulelabel | sort -total_out | limit 500
 - id: zia-dlp-23
   title: Policy Rules Generating Upload Resets / Blocks
   notes: 'Useful for validating whether existing controls are firing where expected. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND !(event.action in ('Allow','Allowed','ALLOW')) | group events=count(), users=estimate_distinct(event.user), total_out=sum(outB) by event.rulelabel, event.action | sort -events | limit 500
+  pq: serverHost='{{src_zia|zia}}' | let method=(event.requestmethod || event.method || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | filter isUpload AND !(event.action in ('Allow','Allowed','ALLOW')) | group events=count(), users=estimate_distinct(event.user), total_out=sum(outB) by event.rulelabel, event.action | sort -events | limit 500
 - id: zia-dlp-24
   title: User Risk Rollup
   notes: 'Starter behavioral score using upload volume, after-hours activity, destination diversity, and high-risk destinations. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let hour=hourofday(ts) | let method=(event.requestmethod || event.method || '') | let host=(event.hostname || event.url || event.dns_req || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | let isAfterHours=(hour < 7 OR hour > 19) | let isHighRisk=(host contains:anycase('wetransfer','mega','mediafire','pastebin','gist.github','dropbox','drive.google','icloud','github','gitlab','bitbucket')) | filter isUpload | group events=count(), total_out=sum(outB), destinations=estimate_distinct(host), after_hours=count(if(isAfterHours,1,null)), high_risk=count(if(isHighRisk,1,null)) by event.user, event.deviceowner, event.devicehostname | sort -total_out | limit 500
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let hour=hourofday(ts) | let method=(event.requestmethod || event.method || '') | let host=(event.hostname || event.url || event.dns_req || '') | let url=(event.url || event.hostname || event.dns_req || '') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in ('POST','PUT') OR url contains:anycase('upload','put','attachment','share','files','api') OR outB > 5000000) | let isAfterHours=(hour < 7 OR hour > 19) | let isHighRisk=(host contains:anycase('wetransfer','mega','mediafire','pastebin','gist.github','dropbox','drive.google','icloud','github','gitlab','bitbucket')) | filter isUpload | group events=count(), total_out=sum(outB), destinations=estimate_distinct(host), after_hours=count(if(isAfterHours,1,null)), high_risk=count(if(isHighRisk,1,null)) by event.user, event.deviceowner, event.devicehostname | sort -total_out | limit 500
 - id: zia-dlp-25
   title: Potential Staging Behavior
   notes: 'Multiple smaller outbound events before larger transfers. Useful as a proxy where explicit file telemetry is unavailable. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group events=count(), small_uploads=count(if(outB > 1000000 AND outB < 10000000,1,null)), large_uploads=count(if(outB >= 10000000,1,null)), total_out=sum(outB) by bucket=timebucket(ts,'1h'), event.user, event.devicehostname | filter small_uploads >= 3 AND large_uploads >= 1 | sort -total_out | limit 1000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group events=count(), small_uploads=count(if(outB > 1000000 AND outB < 10000000,1,null)), large_uploads=count(if(outB >= 10000000,1,null)), total_out=sum(outB) by bucket=timebucket(ts,'1h'), event.user, event.devicehostname | filter small_uploads >= 3 AND large_uploads >= 1 | sort -total_out | limit 1000
 - id: zia-dlp-26
   title: All ZIA Raw Activity
   notes: 'Raw drilldown panel for ad hoc investigation and pivots by user, device, domain, country, or rule. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
-  pq: serverHost='zia' | let ts=(event.datetime || timestamp || sca:ingestTime) | columns ts, event.user, event.deviceowner, event.devicehostname, event.requestmethod, event.method, event.url, event.hostname, event.appname, event.urlcategory, event.urlsupercategory, event.destcountry, event.action, event.rulelabel, event.inbytes, event.outbytes, event.threatcat, event.threatname, event.threat_score, event.threat_severity | sort -ts | limit 10000
+  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | columns ts, event.user, event.deviceowner, event.devicehostname, event.requestmethod, event.method, event.url, event.hostname, event.appname, event.urlcategory, event.urlsupercategory, event.destcountry, event.action, event.rulelabel, event.inbytes, event.outbytes, event.threatcat, event.threatname, event.threat_score, event.threat_severity | sort -ts | limit 10000
 - id: zia-dlp-27
   title: Large Archive Creation (>50MB)
   notes: 'High-signal staging panel. Finds large archives created locally before potential transfer or exfiltration. | Source: zia / EDR / google_workspace / box / onedrive depending on query | Pivot if positive: User timeline, endpoint staging, source app logs, policy review'
