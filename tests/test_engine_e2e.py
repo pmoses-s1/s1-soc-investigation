@@ -90,6 +90,58 @@ def test_query_syntax_error_is_permanent(tmp_path):
     led.close()
 
 
+def _broken_cat():
+    return Catalog(name="brk", queries=[
+        Query(id="broken", title="Broken",
+              pq="dataSource.name='Z' BROKEN {{entity}} | limit 1",
+              merge=MergeSpec(kind="rows"))])
+
+
+def _fast_engine(tmp_path, transport, pool_size=4):
+    # High rps so the rate limiter is not a timing factor in these tests.
+    cfg = load_config(require_credentials=False, console_url="https://mock",
+                      tokens=["t1", "t2"], poll_interval_s=0.001, query_timeout_s=5.0,
+                      rps=10000.0, burst=10000)
+    return InvestigationEngine(cfg, output_root=tmp_path, transport=transport,
+                               pool_size=pool_size)
+
+
+def test_permanent_error_aborts_remaining_slices_of_query(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    cat = _broken_cat()
+    # Many slices (> worker pool) so the breaker demonstrably skips some of them.
+    eng = _fast_engine(tmp_path, FakeTransport(fail_query_substr={"BROKEN": "syntax"}))
+    params = RunParams(case_id="C", entity="dave", lookback_days=15, slice_days=1,
+                       abort_query_on_permanent=True)
+    eng.plan("run-cb", cat, params, led)
+    result = eng.run("run-cb", led, params)
+    broken_total = sum(result["coverage"]["per_query"]["broken"].values())
+    # Some slices were rejected, and the breaker skipped the rest instead of re-failing.
+    assert result["stats"]["permanent"] >= 1
+    assert result["stats"]["aborted"] >= 1
+    assert result["stats"]["permanent"] < broken_total          # the breaker saved slices
+    assert result["stats"]["permanent"] + result["stats"]["aborted"] == broken_total
+    v = verify_run(led, "run-cb", cat)
+    assert {q.query_id: q.status for q in v.queries}["broken"] == "failed"
+    assert result["coverage"]["complete"]                        # no slices left pending
+    led.close()
+
+
+def test_abort_disabled_attempts_every_slice(tmp_path):
+    led = Ledger(tmp_path / "ledger.db")
+    cat = _broken_cat()
+    eng = _fast_engine(tmp_path, FakeTransport(fail_query_substr={"BROKEN": "syntax"}))
+    params = RunParams(case_id="C", entity="erin", lookback_days=6, slice_days=1,
+                       abort_query_on_permanent=False)
+    eng.plan("run-nb", cat, params, led)
+    result = eng.run("run-nb", led, params)
+    broken_total = sum(result["coverage"]["per_query"]["broken"].values())
+    # With the breaker off, every slice is attempted and permanently fails.
+    assert result["stats"]["aborted"] == 0
+    assert result["stats"]["permanent"] == broken_total
+    led.close()
+
+
 def test_resume_retries_failed_slices_on_second_run(tmp_path):
     led = Ledger(tmp_path / "ledger.db")
     flaky = Query(id="flaky", title="Flaky",

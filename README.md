@@ -105,6 +105,14 @@ Concretely, it lets you:
 classification (429 backs off, 5xx/timeout retries then subdivides, 400 syntax is permanent), and
 merge-aware reassembly (count/sum additive, min/max reduce, estimate_distinct flagged approximate).
 
+**Broken-query circuit breaker.** A permanent (rejected / 400-syntax) error is deterministic for the
+whole query, so once one slice is rejected the engine **auto-aborts that query's remaining slices**
+instead of re-failing it every day and burning the rate budget. The other queries keep running. The
+verification panel shows the exact rejection reason, so you can fix the query in the catalog editor
+(Edit, then Validate vs SDL) and start a new run for the same case: cached past days mean only the
+fixed query actually re-executes. The behaviour is on by default and can be toggled per run with **Stop
+query on permanent error**.
+
 **Throughput.** The LRQ v2 async lifecycle (launch/poll/cancel with the forward tag), a per-token
 token-bucket rate governor (~2.5 rps under the 3 rps per-user cap), a worker pool that round-robins
 across multiple service-user tokens, and an AIMD controller that shrinks concurrency on 429s and grows

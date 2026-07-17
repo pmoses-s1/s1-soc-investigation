@@ -275,7 +275,8 @@ def start_run(d: dict) -> dict:
         slice_days=int(d.get("sliceDays", 1)), max_attempts=int(d.get("maxAttempts", 4)),
         subdivide_on_timeout=bool(d.get("subdivide", True)),
         priority=d.get("priority", "LOW"), variables=d.get("vars") or {},
-        start_date=(d.get("startDate") or None), end_date=(d.get("endDate") or None))
+        start_date=(d.get("startDate") or None), end_date=(d.get("endDate") or None),
+        abort_query_on_permanent=bool(d.get("abortOnPermanent", True)))
 
     started_at = datetime.now(timezone.utc).isoformat()
     # Persist run metadata so the run can be resumed or reopened later (survives restart).

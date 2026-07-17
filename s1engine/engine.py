@@ -57,6 +57,10 @@ class RunParams:
     variables: Optional[Dict[str, str]] = None
     start_date: Optional[str] = None   # "YYYY-MM-DD" (inclusive), overrides lookback_days
     end_date: Optional[str] = None     # "YYYY-MM-DD" (inclusive)
+    # Circuit breaker: once a query is rejected with a permanent (syntax/400) error,
+    # a syntax error is deterministic for the whole query, so skip its remaining
+    # slices instead of re-failing every day and wasting the rate budget.
+    abort_query_on_permanent: bool = True
 
 
 class InvestigationEngine:
@@ -194,7 +198,11 @@ class InvestigationEngine:
         outstanding = {"n": 0}
         out_lock = threading.Lock()
         stats = {"done": 0, "cached": 0, "failed": 0, "permanent": 0,
-                 "throttles": 0, "retries": 0, "subdivided": 0}
+                 "throttles": 0, "retries": 0, "subdivided": 0, "aborted": 0}
+        # Circuit breaker state: query_id -> the permanent error that tripped it.
+        # Reset per run so a resume re-evaluates the query.
+        self._broken: Dict[str, str] = {}
+        self._broken_lock = threading.Lock()
 
         def enqueue(job: Job) -> None:
             with out_lock:
@@ -252,6 +260,18 @@ class InvestigationEngine:
 
     def _process_job(self, job: Job, ledger: Ledger, params: RunParams,
                      stats: Dict[str, int], enqueue: Callable[[Job], None]) -> None:
+        # Circuit breaker: if this query already hit a permanent (syntax/400) error
+        # on another slice, skip the rest of its slices instead of re-failing each
+        # day. Marks them terminal (permanent) so coverage still completes.
+        if params.abort_query_on_permanent:
+            with self._broken_lock:
+                reason = self._broken.get(job.query_id)
+            if reason is not None:
+                ledger.mark_permanent(job.job_id, error=f"aborted: query rejected earlier ({reason})")
+                stats["aborted"] += 1
+                self._emit({"event": "slice_aborted", "query": job.query_id,
+                            "slice": job.slice_key})
+                return
         # Phase 2: serve immutable past-day slices from the shared cache without
         # touching the backend, the rate budget, or the concurrency limit.
         cacheable = self._cutoff_iso is not None and job.slice_end <= self._cutoff_iso
@@ -299,6 +319,15 @@ class InvestigationEngine:
                 stats["permanent"] += 1
                 self._emit({"event": "permanent", "query": job.query_id,
                                   "slice": job.slice_key, "error": str(e)[:200]})
+                # Trip the circuit breaker for this query so its remaining slices
+                # are skipped rather than each re-hitting the same syntax error.
+                if params.abort_query_on_permanent:
+                    with self._broken_lock:
+                        first = job.query_id not in self._broken
+                        self._broken[job.query_id] = str(e)[:200]
+                    if first:
+                        self._emit({"event": "query_aborted", "query": job.query_id,
+                                    "error": str(e)[:200]})
                 return
             except ServerError as e:
                 self._handle_transient(job, ledger, params, stats, enqueue,

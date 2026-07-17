@@ -210,6 +210,7 @@
         <div style="display:flex;flex-direction:column;justify-content:flex-end;gap:6px;padding-bottom:4px">
           <div class="chk"><input id="subdivide" type="checkbox" checked><label>Adaptive sub-slice <span class="help" data-tip="If a slice keeps timing out, split it into smaller windows and retry those instead of failing the whole day.">?</span></label></div>
           <div class="chk"><input id="useCache" type="checkbox" checked><label>Use cache <span class="help" data-tip="Reuse results for immutable past days from previous runs, so only new or changed days re-run. Today's partial day always re-runs.">?</span></label></div>
+          <div class="chk"><input id="abortPerm" type="checkbox" checked><label>Stop query on permanent error <span class="help" data-tip="A permanent (syntax / rejected) error is deterministic for the whole query, so once one slice is rejected the remaining day-slices of that query are skipped instead of re-failing each day. Saves time and rate budget. Uncheck to attempt every slice anyway.">?</span></label></div>
         </div>
       </div>
       <div class="chk"><input id="mock" type="checkbox"><label>Dry run (offline mock) <span class="help" data-tip="Run offline against a built-in fake backend to try the whole flow without a tenant or credentials.">?</span></label></div>
@@ -480,7 +481,8 @@ function buildBaseBody(){
     lookback:parseInt($("lookback").value)||90,sliceDays:parseInt($("sliceDays").value)||1,
     outputDir:$("outputDir").value.trim(),pool:parseInt($("pool").value)||null,
     maxAttempts:parseInt($("maxAttempts").value)||4,subdivide:$("subdivide").checked,
-    useCache:$("useCache").checked,priority:$("priority").value,mock:$("mock").checked,mockThrottle:0,
+    useCache:$("useCache").checked,abortOnPermanent:$("abortPerm").checked,
+    priority:$("priority").value,mock:$("mock").checked,mockThrottle:0,
     vars:VARS};
   const f=$("fromDate").value, t=$("toDate").value;
   if(f&&t){ b.startDate=f; b.endDate=t; }
@@ -560,9 +562,11 @@ function addLine(ev){
   else if(ev.event==="throttled")COUNTS.throttled++;
   else if(ev.event==="retry")COUNTS.retried++;
   else if(ev.event==="subdivided")COUNTS.subdivided++;
+  if(ev.event==="slice_aborted")COUNTS.aborted=(COUNTS.aborted||0)+1;
   const cls={slice_done:"ok",slice_cached:"cache",slice_failed:"fail",permanent:"perm",subdivided:"warn",
     verification:"info",resume:"info",planned:"info",finalized:"info",workbook:"info",warning:"warn",
-    cancelling:"warn",cancelled:"warn",throttled:"warn",retry:"warn",error:"fail"}[ev.event]||"";
+    cancelling:"warn",cancelled:"warn",throttled:"warn",retry:"warn",error:"fail",
+    query_aborted:"perm",slice_aborted:"warn"}[ev.event]||"";
   const t=new Date((ev.ts||0)*1000).toLocaleTimeString();
   const div=document.createElement("div"); div.className="le "+cls;
   div.innerHTML=`<span class="t">${t}</span> <span class="m">${fmt(ev)}</span>`;
@@ -579,6 +583,8 @@ function fmt(e){switch(e.event){
   case"throttled":return `throttled ${e.query} [${e.slice}] backing off (gov=${e.gov_limit})`;
   case"retry":return `retry ${e.query} [${e.slice}] attempt ${e.attempt}${e.error?": "+e.error:""}`;
   case"query_skipped":return `skipped ${e.query} (needs ${(e.missing||[]).join(", ")})`;
+  case"query_aborted":return `ABORT ${e.query}: permanent error, skipping its remaining slices${e.error?" ("+e.error+")":""}`;
+  case"slice_aborted":return `abort ${e.query} [${e.slice}] (query rejected earlier; slice skipped)`;
   case"workbook":return `workbook → ${e.path}`;
   case"cancelling":return "cancel requested — stopping after in-flight slices finish";
   case"cancelled":return `cancelled (done ${e.done}); re-run the same case to resume`;
@@ -622,7 +628,7 @@ function renderVerification(s){
   if($("btnResume")) $("btnResume").onclick=async()=>{ const r=await apiPost("/api/resume",{runId:CURRENT}); if(r.error){alert(r.error);return;} viewRun(r.run_id,r.run_dir); };
   const st=s.stats||{};
   $("stats").innerHTML=Object.entries({done:st.done,cached:st.cached,failed:st.failed,permanent:st.permanent,
-    retries:st.retries,throttles:st.throttles,subdivided:st.subdivided}).filter(([k,x])=>x!==undefined)
+    aborted:st.aborted,retries:st.retries,throttles:st.throttles,subdivided:st.subdivided}).filter(([k,x])=>x!==undefined)
     .map(([k,x])=>`<span class="stat">${k} <b>${x}</b></span>`).join("");
   // findings first: rows desc, then failing, then rest
   const rank=q=> (q.status==="failed"?3:0) + (q.result_rows>0?2:0);
@@ -882,15 +888,16 @@ $("btnHistoryRefresh").onclick=loadHistory;
 
 /* ---------- persist run form ---------- */
 const FORM_FIELDS=["case","catalog","lookback","sliceDays","outputDir","pool","maxAttempts","priority","fromDate","toDate"];
-function saveForm(){ const o={}; FORM_FIELDS.forEach(k=>{if($(k))o[k]=$(k).value;}); o.subdivide=$("subdivide").checked; o.useCache=$("useCache").checked; o.poolEdited=poolEdited; try{localStorage.setItem("s1ie_form",JSON.stringify(o));}catch(e){} }
+function saveForm(){ const o={}; FORM_FIELDS.forEach(k=>{if($(k))o[k]=$(k).value;}); o.subdivide=$("subdivide").checked; o.useCache=$("useCache").checked; o.abortPerm=$("abortPerm").checked; o.poolEdited=poolEdited; try{localStorage.setItem("s1ie_form",JSON.stringify(o));}catch(e){} }
 function restoreForm(){ let o={}; try{o=JSON.parse(localStorage.getItem("s1ie_form")||"{}");}catch(e){}
   FORM_FIELDS.forEach(k=>{ if(o[k]==null||o[k]===""||!$(k))return;
     if(k==="catalog"){ if(CATALOGS.some(c=>c.path===o[k])) $(k).value=o[k]; }  // skip stale catalog paths
     else $(k).value=o[k]; });
   if(o.poolEdited) poolEdited=true;   // a manual pool override survives reloads
-  if(o.subdivide!=null)$("subdivide").checked=o.subdivide; if(o.useCache!=null)$("useCache").checked=o.useCache; }
+  if(o.subdivide!=null)$("subdivide").checked=o.subdivide; if(o.useCache!=null)$("useCache").checked=o.useCache;
+  if(o.abortPerm!=null)$("abortPerm").checked=o.abortPerm; }
 FORM_FIELDS.forEach(k=>{ const el=$(k); if(el) el.addEventListener("change",saveForm); });
-$("subdivide").addEventListener("change",saveForm); $("useCache").addEventListener("change",saveForm);
+$("subdivide").addEventListener("change",saveForm); $("useCache").addEventListener("change",saveForm); $("abortPerm").addEventListener("change",saveForm);
 
 /* ---------- auto-tune worker pool from token count ---------- */
 function countTokens(){
