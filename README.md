@@ -150,12 +150,23 @@ workbook: eight domain catalogs (`dfir_identity_access`, `dfir_endpoint`, `dfir_
 master `dfir_insider_threat_full` for a one-click full sweep. Pick a domain catalog per phase, or the
 master to run everything the provided variables allow.
 
-Queries use template variables. `{{entity}}` (the subject) is set on the run form; the rest are set in
-the **Variables** popup: `{{hostname}}`, `{{agent_uuid}}`, `{{ip}}`, `{{username}}`, `{{sf_user_id}}`,
-`{{session}}`, plus optional config datatable names (`dt_*`) for the identity-mapping queries. A query
-whose variables are not all set is **skipped, not failed**, so you run the identity phase first, fill
-in the host/agent you discover, and re-run to light up the endpoint and network queries. The catalog
-dropdown shows which variables each catalog needs and which are still unset.
+Every environment- or subject-specific value in a query is a template variable, not a hardcoded string.
+The **Variables** popup groups them:
+
+- **Investigation subject** (`{{hostname}}`, `{{agent_uuid}}`, `{{ip}}`, `{{username}}`, `{{sf_user_id}}`,
+  `{{session}}`, `{{app_name}}`, `{{domain}}`, `{{login_key}}`, `{{file_or_title}}`). `{{entity}}` (the
+  subject) is set on the run form. A query whose subject variables are not all set is **skipped, not
+  failed**, so you run the identity phase first, fill in what you discover, and re-run to light up the
+  endpoint and network queries.
+- **Config datatables** (`dt_*`) for the identity-mapping queries: set the ones your tenant has.
+- **Data source names** (`src_*`): the SDL `serverHost` sources each query reads from (zia, okta,
+  slack, salesforce, …). These carry a default (the source's name in the reference workbook) using the
+  `{{var|default}}` syntax, so queries run out of the box; override one only if your tenant ingests that
+  source under a different name.
+
+Every field has a `?` tooltip. **Import / Export variables** saves the whole set to a JSON file (or loads
+one), so you can reuse a configuration across cases or share it with a teammate. The catalog dropdown
+shows which variables each catalog needs and which are still unset.
 
 **Refresh catalogs from the repo.** The **Refresh from repo** button pulls the latest `catalogs/`
 from GitHub into the persisted catalogs folder at runtime, so query updates do not require rebuilding
