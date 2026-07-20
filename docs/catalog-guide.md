@@ -83,3 +83,46 @@ The linter's rules are all verified against a live tenant: `field == null` (HTTP
 top-level `"quoted fields"`, bare case-sensitive `contains 'x'`, and `nolimit` are
 valid and are not flagged. `pytest tests/test_catalog_lint.py` fails the build if any
 bundled catalog regresses.
+
+## Linting a raw list of PowerQueries from the CLI
+
+To check ad-hoc queries (not a catalog), put them in a plain text file, **one query per
+block, separated by a blank line**, and pass `--pq-file`. Each block may span multiple
+lines; template variables like `{{entity}}` are fine (dummy values are used).
+
+```text
+# queries.txt
+serverHost='okta' actor.alternateId='{{entity}}' | limit 1 | columns actor.alternateId
+
+serverHost='oplockdown' | filter owner == null | limit 1
+
+event.type='Process Creation' | head 5 | columns endpoint.name
+```
+
+```bash
+# static lint only, no tenant needed (fast, CI-friendly)
+python -m s1engine.cli validate --pq-file queries.txt --lint-only
+
+# also launch each query over a short window with dummy vars (needs credentials)
+python -m s1engine.cli validate --pq-file queries.txt
+
+# offline against the fake backend
+python -m s1engine.cli validate --pq-file queries.txt --mock
+```
+
+Queries are reported as `q1`, `q2`, ... in file order. Example output for the file above:
+
+```text
+== queries.txt  (3 queries) ==
+  LINT  q2: `== null` is rejected by SDL (HTTP 500); use `!field` for empty/absent
+  LINT  q3: `| head` is invalid; use `| limit N`
+
+=== validation summary ===
+lint issues : 2
+```
+
+The command exits non-zero when there are lint issues (or, without `--lint-only`, any
+query SDL rejects), so it drops straight into a CI check or a pre-commit hook. Running
+inside the published image works too: `docker run --rm -v "$PWD:/work"
+ghcr.io/pmoses-s1/s1-soc-investigation:latest python -m s1engine.cli validate
+--pq-file /work/queries.txt --lint-only`.

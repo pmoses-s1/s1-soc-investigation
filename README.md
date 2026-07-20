@@ -337,7 +337,14 @@ docker run --rm -v "$PWD/investigations:/data" --env-file .env \
 # dry run offline (no tenant), resume with the same --run-id, export a run:
 python -m s1engine.cli run --case DEMO --entity a@corp.com --catalog catalogs/insider_threat.yaml --lookback 7 --mock
 python -m s1engine.cli export --run-dir /data/CASE-1234/<run_id> --kind results
+
+# lint/validate queries: a catalog, a directory, or a raw --pq-file list (blank-line separated)
+python -m s1engine.cli validate --lint-only --dir catalogs
+python -m s1engine.cli validate --pq-file queries.txt --lint-only
 ```
+
+Linting a raw list of PowerQueries from the CLI (no catalog needed) is covered in the
+[catalog guide](docs/catalog-guide.md#linting-a-raw-list-of-powerqueries-from-the-cli).
 
 ## Roadmap
 

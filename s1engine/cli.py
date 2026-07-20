@@ -176,16 +176,39 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pq_file_to_catalog(pq_file: str):
+    """Build an in-memory catalog from a plain file of PowerQueries separated by blank
+    lines (each block is one query, in order q1, q2, ...)."""
+    import re as _re
+    from .catalog import Catalog, Query, MergeSpec
+    blocks = [b.strip() for b in _re.split(r"\n\s*\n", Path(pq_file).read_text()) if b.strip()]
+    if not blocks:
+        raise SystemExit(f"no queries found in {pq_file} (separate queries with a blank line)")
+    queries = [Query(id=f"q{i + 1}", title=f"query {i + 1}", pq=b, merge=MergeSpec(kind="rows"))
+               for i, b in enumerate(blocks)]
+    return Catalog(name=Path(pq_file).name, queries=queries)
+
+
 def cmd_validate(args: argparse.Namespace) -> int:
     """Test harness: lint every query offline, then (unless --lint-only) launch each
-    against SDL over a short window with dummy vars to confirm it is accepted."""
-    if args.catalog:
-        paths = [Path(args.catalog)]
+    against SDL over a short window with dummy vars to confirm it is accepted. Accepts
+    a catalog file, a directory of catalogs, or a plain --pq-file list of queries."""
+    catalogs = []   # list of (label, Catalog | Exception)
+    if args.pq_file:
+        catalogs.append((Path(args.pq_file).name, _pq_file_to_catalog(args.pq_file)))
     else:
-        d = Path(args.dir)
-        paths = sorted(list(d.glob("*.yaml")) + list(d.glob("*.yml")) + list(d.glob("*.json")))
-    if not paths:
-        raise SystemExit(f"no catalogs found (looked in {args.catalog or args.dir})")
+        if args.catalog:
+            paths = [Path(args.catalog)]
+        else:
+            d = Path(args.dir)
+            paths = sorted(list(d.glob("*.yaml")) + list(d.glob("*.yml")) + list(d.glob("*.json")))
+        if not paths:
+            raise SystemExit(f"no catalogs found (looked in {args.catalog or args.dir})")
+        for p in paths:
+            try:
+                catalogs.append((p.name, load_catalog(p)))
+            except Exception as e:  # noqa: BLE001
+                catalogs.append((str(p), e))
 
     config = None
     transport = None
@@ -204,14 +227,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
             config = load_config(**overrides)
 
     lint_total = invalid_total = valid_total = unknown_total = 0
-    for path in paths:
-        try:
-            cat = load_catalog(path)
-        except Exception as e:  # noqa: BLE001
-            print(f"\n== {path} ==\n  PARSE ERROR: {e}")
+    for label, cat in catalogs:
+        if isinstance(cat, Exception):
+            print(f"\n== {label} ==\n  PARSE ERROR: {cat}")
             invalid_total += 1
             continue
-        print(f"\n== {path.name}  ({len(cat.enabled_queries())} queries) ==")
+        print(f"\n== {label}  ({len(cat.enabled_queries())} queries) ==")
         lint = lint_catalog(cat)
         for qid, issues in lint.items():
             for msg in issues:
@@ -282,10 +303,12 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--out", default=None, help="output .zip path (default: cwd)")
     e.set_defaults(func=cmd_export)
 
-    v = sub.add_parser("validate", help="test harness: lint + validate catalog queries "
-                                        "(with dummy vars) against SDL")
+    v = sub.add_parser("validate", help="test harness: lint + validate catalog or raw "
+                                        "PowerQueries (with dummy vars) against SDL")
     v.add_argument("--catalog", default=None, help="a single catalog file (default: all in --dir)")
     v.add_argument("--dir", default="catalogs", help="directory of catalogs to validate")
+    v.add_argument("--pq-file", default=None,
+                   help="a plain file of PowerQueries separated by blank lines (lint a raw list)")
     v.add_argument("--lint-only", action="store_true", help="static checks only, no tenant needed")
     v.add_argument("--mock", action="store_true", help="validate against the offline fake backend")
     v.add_argument("--window-hours", type=int, default=1, help="probe window per query (default 1h)")
