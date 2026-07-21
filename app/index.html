@@ -305,8 +305,9 @@
     <div class="btnrow" style="margin-top:10px">
       <button class="ghost sm" id="btnVarsImport">Import variables</button>
       <button class="ghost sm" id="btnVarsExport">Export variables</button>
+      <button class="ghost sm" id="btnVarsClear">Clear variables</button>
       <input type="file" id="varsFileInput" accept=".json,application/json" style="display:none">
-      <span class="help" data-tip="Save the whole variable set to a JSON file, or load one, so you can reuse the same configuration across cases or share it with a teammate. Import merges into the current values.">?</span>
+      <span class="help" data-tip="Save the whole variable set to a JSON file, or load one, so you can reuse the same configuration across cases or share it with a teammate. Import merges into the current values. Clear empties every field so you can start fresh (the entity on the run form is unaffected).">?</span>
     </div>
     <div style="margin-top:16px;font-size:12.5px;color:var(--label);font-weight:600">Investigation subject
       <span class="help" data-tip="Values about the subject you are investigating. Each fills the matching {{placeholder}}. Leave one blank to skip the queries that need it.">?</span></div>
@@ -436,6 +437,17 @@ $("btnVarsExport").onclick=()=>{
   a.download="s1_investigation_variables.json"; a.click();
 };
 $("btnVarsImport").onclick=()=>$("varsFileInput").click();
+/* Clear every variable field so the analyst can start fresh. Empties the inputs
+   and the saved set (the entity on the run form is untouched); the modal stays
+   open so the reset is visible. */
+$("btnVarsClear").onclick=()=>{
+  SUBJECT_VARS.forEach(s=>{ const el=$("sv_"+s.var); if(el) el.value=""; });
+  DTS.forEach(d=>{ const el=$("dt_"+d.var); if(el) el.value=""; });
+  SRCS.forEach(s=>{ const el=$("srcf_"+s.var); if(el) el.value=""; });
+  const c=$("v_custom"); if(c) c.value="";
+  VARS={}; try{ localStorage.removeItem("s1ie_vars"); }catch(e){}
+  renderVarsSummary(); updateCatVars(); updatePreview();
+};
 $("varsFileInput").onchange=e=>{
   const f=e.target.files[0]; if(!f)return;
   const r=new FileReader();
@@ -614,10 +626,15 @@ function fmt(e){switch(e.event){
   case"slice_cached":return `CACHE ${e.query} [${e.slice}] rows=${e.rows} (served from cache)`;
   case"slice_failed":return `FAIL ${e.query} [${e.slice}] ${e.error||""}`;
   case"permanent":return `PERM ${e.query} [${e.slice}] ${e.error||""}`;
-  case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices`;
+  case"subdivided":return `split ${e.query} [${e.slice}] → ${e.children} sub-slices${e.reason==="timeout"?" (wall timeout: too heavy for this window)":""}`;
   case"throttled":return `throttled ${e.query} [${e.slice}] backing off (gov=${e.gov_limit})`;
   case"retry":return `retry ${e.query} [${e.slice}] attempt ${e.attempt}${e.error?": "+e.error:""}`;
-  case"query_skipped":return `skipped ${e.query} (needs ${(e.missing||[]).join(", ")})`;
+  case"query_skipped":{
+    if(e.reason==="no_subject_value")return `skipped ${e.query} (subject query: set one of ${(e.missing||[]).join(", ")} to run it scoped)`;
+    if(e.reason==="no_pivot_value")return `skipped ${e.query} (pivot query: set one of ${(e.missing||[]).join(", ")})`;
+    if(e.reason&&e.reason.indexOf("scope_no_filter")>=0)return `skipped ${e.query} (scope ${e.scope} but no ${e.scope} filter in the query - needs fixing)`;
+    return `skipped ${e.query} (needs ${(e.missing||[]).join(", ")})`;
+  }
   case"source_empty":return `NO DATA: ${e.source} had no events on [${e.slice}]; skipping all its queries that day`;
   case"source_field_mismatch":return `NOTE ${e.source}: data is under ${e.other_field}, but queries use ${e.used_field}='${e.source}'. Switch Source field to ${e.other_field} (or fix the query).`;
   case"slice_skipped_empty":return `empty ${e.query} [${e.slice}] (${e.source}${e.other_field?" data is under "+e.other_field:" had no data that day"})`;
@@ -954,6 +971,17 @@ function onCatalogChange(){ SELECTED_QIDS=null; updateCatVars(); updatePreview()
 ["lookback","sliceDays","fromDate","toDate"].forEach(id=>{ const el=$(id); if(el) el.addEventListener("change",updatePreview); });
 
 /* ---------- query selection ---------- */
+/* Small coloured tag showing a query's scope so the analyst can see at a glance
+   which queries are subject-scoped vs intentionally tenant-wide. */
+function scopeTag(scope){
+  if(!scope) return "";
+  const c={subject:"#5b8def",pivot:"#8a6ddb",environment:"#c98a2b",coverage:"#3c9a7a"}[scope]||"#888";
+  const tip={subject:"Filtered to the investigation subject",
+    pivot:"Scoped by a discovered pivot value (domain/file/app/session/login key)",
+    environment:"Intentionally tenant-wide (rankings, totals, inventory) - not subject-specific",
+    coverage:"Tenant-wide source/schema coverage check"}[scope]||"";
+  return `<span class="scopetag" title="${tip}" style="font-size:10px;font-weight:600;color:#fff;background:${c};border-radius:6px;padding:1px 6px;margin-left:4px">${scope}</span>`;
+}
 function qRows(){ return [...document.querySelectorAll("#qList .qrow")]; }
 function qVisible(){ return qRows().filter(r=>r.style.display!=="none"); }
 function qUpdate(){
@@ -966,7 +994,7 @@ $("btnQueries").onclick=async()=>{
   const c=curCat(); if(!c){setRunMsg("Pick a catalog first.",true);return;}
   const d=await apiGet("/api/catalog?path="+encodeURIComponent(c.path));
   const sel=SELECTED_QIDS?new Set(SELECTED_QIDS):null;
-  $("qList").innerHTML=(d.queries||[]).map(q=>`<label class="chk qrow" data-text="${(q.id+' '+(q.title||'')).toLowerCase().replace(/"/g,'')}" style="margin-top:6px"><input type="checkbox" class="qc" value="${q.id}" ${(!sel||sel.has(q.id))?"checked":""}> <span>${q.id} <span class="kv">${q.title||""}</span></span></label>`).join("");
+  $("qList").innerHTML=(d.queries||[]).map(q=>`<label class="chk qrow" data-text="${(q.id+' '+(q.title||'')+' '+(q.scope||'')).toLowerCase().replace(/"/g,'')}" style="margin-top:6px"><input type="checkbox" class="qc" value="${q.id}" ${(!sel||sel.has(q.id))?"checked":""}> <span>${q.id} <span class="kv">${q.title||""}</span> ${scopeTag(q.scope)}</span></label>`).join("");
   $("qSearch").value=""; qUpdate(); $("qModal").classList.add("open");
 };
 $("qSearch").oninput=()=>{

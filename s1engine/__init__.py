@@ -20,4 +20,4 @@ See README.md for the full roadmap (Phases 2-4: content-addressed cache,
 merge-aware workbook export, orchestrator UX).
 """
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"

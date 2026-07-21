@@ -12,10 +12,30 @@ pivots). On import, queries were normalized for SDL (`== null` -> `!field`,
 `!= null` -> `field = *`, placeholders -> `{{var}}`, `serverHost` -> overridable
 `{{src_*|default}}`), de-duplicated by body, and linted; nothing invalid ships.
 
+## Query scope (subject vs tenant-wide)
+
+Every query carries a `scope` so an investigation of one person never silently
+returns the whole tenant:
+
+- **`subject`** must filter to the investigated person or endpoint (`{{entity}}`,
+  `{{username}}`, `{{hostname}}`, `{{agent_uuid}}`, `{{ip}}`, `{{sf_user_id}}`).
+  The engine skips a subject query (reason `no_subject_value`, not a failure) until
+  at least one of its subject values is set, so it can never run fleet-wide.
+- **`pivot`** is scoped by a discovered value (`{{domain}}`, `{{file_or_title}}`,
+  `{{app_name}}`, `{{session}}`, `{{login_key}}`) and is gated the same way.
+- **`environment`** is intentionally tenant-wide: Top Users, Unique Users, totals,
+  rankings, and software inventory. These run fleet-wide by design and are labelled
+  so analysts know the results are not subject-specific.
+- **`coverage`** is a tenant-wide source/schema presence check.
+
+The UI tags each query with its scope, and `python -m s1engine.cli validate`
+reports the scope mix per catalog and flags any subject/pivot query that lacks its
+filter (a build-failing regression test guards the bundled catalogs).
+
 ## Domain catalogs
 
 Pick the catalog for the phase you are working, or the master for everything the
-variables allow. Query counts below are as of v0.4.1; the catalog dropdown in the UI shows the live count.
+variables allow. Query counts below are as of v0.4.2; the catalog dropdown in the UI shows the live count.
 
 | Catalog | Queries | Focus | What it covers |
 |---|---:|---|---|
@@ -29,6 +49,7 @@ variables allow. Query counts below are as of v0.4.1; the catalog dropdown in th
 | `dfir_exfil_dlp` | 48 | Exfil & DLP | Cross-source exfiltration and data-loss signals (endpoint + web + SaaS staging and transfer). |
 | `dfir_cloud` | 3 | Cloud | Cloud control-plane activity (e.g. AWS). |
 | `dfir_correlation` | 15 | Cross-source correlation | Quick pivots and multi-source stitching (session keys, login keys, IOC sweeps). |
+| `dfir_location_compliance` | 63 | Location / residency | Where was the subject working from? Okta, ZPA, ZIA, EDR LAN evidence, OS timezone/WiFi artifacts, badge access, travel (Navan), and multi-source daily country evidence for remote-work / residency compliance cases. All subject-scoped. |
 | `dfir_insider_threat_full` | 640 | Master (full sweep) | Every domain query in one catalog, de-duplicated, for a one-click full investigation. |
 | `insider_threat` | 6 | Minimal example | A tiny sample for demos and smoke tests. |
 

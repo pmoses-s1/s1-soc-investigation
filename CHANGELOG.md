@@ -1,5 +1,50 @@
 # Changelog
 
+## v0.4.2
+
+Query scope enforcement (stop investigations pulling the whole tenant), faster
+handling of heavy slices, and resilient run status. Every query-syntax claim was
+verified live against a tenant before shipping.
+
+### Subject scoping (no more tenant-wide leaks)
+
+- **Every query now has a `scope`:** `subject` (must filter to the investigated
+  person/endpoint), `pivot` (scoped by a discovered domain/file/app/session/login
+  key), `environment` (intentionally tenant-wide: Top/Unique/totals/rankings/
+  inventory), or `coverage` (source/schema presence). See the catalog guide.
+- **The engine hard-skips a subject/pivot query that has no matching filter set**,
+  so a single-subject investigation never silently returns every employee. Skips
+  are reported with a clear reason (`no_subject_value`), never failed.
+- **Rewrote the mis-scoped detail panels** (the reported leak, e.g. `zia-dlp-26`
+  "All ZIA Raw Activity" filtered only on the source) to filter to the subject:
+  ZIA on `event.user`/`event.deviceowner`, EDR on `agent.uuid`/`endpoint.name`/
+  `src.process.user`, oplockdown `owner`, prompt-security `log.user`, Google
+  Workspace `actor.email`/`event.owner`, Salesforce `username`/`UserId`. The
+  multi-source correlation panels get a trailing subject filter on their unified
+  user column. True fleet-wide panels stay `environment`, labelled so analysts
+  know the results are not subject-specific.
+- **Scope audit** (`s1engine/lint.py` + `cli validate`) flags any subject/pivot
+  query that lacks its filter; a bundled-catalog regression test fails the build
+  if the leak is ever reintroduced.
+- New `catalogs/dfir_location_compliance.yaml` (63 subject-scoped queries).
+
+### Execution reliability
+
+- **Wall timeouts subdivide immediately** instead of retrying the same-size slice
+  up to `max_attempts` times (which just times out again). A genuine transient
+  error still retries first. At the smallest window a timeout fails with a "scope
+  to a subject or shorten the lookback" hint.
+- **Run status is always persisted and recoverable.** A crashed or interrupted run
+  no longer reopens as `unknown`: the terminal status is written in a `finally`,
+  and on reopen the verdict is recomputed from the ledger DB, so the run shows an
+  accurate, resumable status. Existing interrupted runs remain fully resumable.
+
+### UI
+
+- Query-selection list shows a colour-coded **scope tag** per query; the Variables
+  popup gains a **Clear variables** button; skip and timeout reasons read clearly
+  in the activity log.
+
 ## v0.4.1
 
 Catalog library expansion, a query test harness, and cost-saving execution controls.

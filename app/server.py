@@ -1011,7 +1011,8 @@ class H(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "catalog not found or not allowed"})
             try:
                 cat = load_catalog(path)
-                queries = [{"id": q.id, "title": q.title} for q in cat.queries]
+                queries = [{"id": q.id, "title": q.title, "scope": q.effective_scope()}
+                           for q in cat.queries]
                 name = cat.name
             except Exception as e:
                 queries, name = [], f"(parse error: {e})"
