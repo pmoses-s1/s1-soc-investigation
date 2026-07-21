@@ -59,3 +59,22 @@ def lint_catalog(cat: Catalog) -> Dict[str, List[str]]:
         if issues:
             out[q.id] = issues
     return out
+
+
+def scope_issues(cat: Catalog) -> Dict[str, str]:
+    """Flag scope-authoring mistakes so a query can never silently run tenant-wide.
+
+    A query whose (effective) scope is `subject` or `pivot` but whose body filters
+    on no such variable would be blocked at run time by the engine's scope gate;
+    surface it here too so it is caught before a run. Returns
+    {query_id: message} for each offending query."""
+    out: Dict[str, str] = {}
+    for q in cat.queries:
+        scope = q.effective_scope()
+        if scope == "subject" and not q.referenced_subject_vars():
+            out[q.id] = ("scope=subject but the body filters on no subject variable; "
+                         "add a subject filter or relabel scope environment/coverage")
+        elif scope == "pivot" and not q.referenced_pivot_vars():
+            out[q.id] = ("scope=pivot but the body filters on no pivot variable; "
+                         "add a pivot filter or relabel the scope")
+    return out

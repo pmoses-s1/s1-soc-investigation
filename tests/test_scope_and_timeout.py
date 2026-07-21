@@ -53,6 +53,22 @@ def test_environment_and_coverage_never_gated():
     assert cov.scope_gate({}) is None
 
 
+def test_bundled_catalogs_are_scope_clean():
+    """No bundled query may be scope=subject/pivot without a matching filter, so
+    nothing can silently run tenant-wide. Guards against reintroducing the leak."""
+    import glob
+    from s1engine.lint import scope_issues
+    offenders = {}
+    for f in sorted(glob.glob("catalogs/dfir_*.yaml")) + ["catalogs/insider_threat.yaml"]:
+        try:
+            issues = scope_issues(load_catalog(f))
+        except FileNotFoundError:
+            continue
+        if issues:
+            offenders[f] = issues
+    assert not offenders, f"scope-authoring issues (would run tenant-wide): {offenders}"
+
+
 def test_load_catalog_rejects_invalid_scope(tmp_path):
     p = tmp_path / "bad.yaml"
     p.write_text("name: bad\nqueries:\n- id: q1\n  pq: \"dataSource.name='X' {{entity}}\"\n  scope: banana\n")

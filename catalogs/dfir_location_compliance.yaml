@@ -1,0 +1,993 @@
+name: 'DFIR: Location Compliance'
+queries:
+- id: loc-cov-01
+  title: Log Sources With Target Email
+  notes: Find which sources contain the subject email. Start here before drawing conclusions from any single source.
+  pq: '* contains ''{{entity}}''
+
+    | let ts=(timestamp || published || created_at || time || receive_time || event.time || sca:ingestTime)
+
+    | filter ts != null
+
+    | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count() by Source=serverHost
+
+    | sort -EventCount
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-cov-02
+  title: Log Sources With Target Username
+  notes: Find which sources contain the subject username. Useful where sources log username instead of email.
+  pq: '* contains ''{{username}}''
+
+    | let ts=(timestamp || published || created_at || time || receive_time || event.time || sca:ingestTime)
+
+    | filter ts != null
+
+    | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count() by Source=serverHost
+
+    | sort -EventCount
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-cov-03
+  title: Daily Activity Across Sources
+  notes: Daily source coverage for the subject email across the investigation period.
+  pq: '* contains ''{{entity}}''
+
+    | let ts=(timestamp || published || created_at || time || receive_time || event.time || sca:ingestTime)
+
+    | filter ts != null
+
+    | group Events=count(), Sources=array_agg_distinct(serverHost,20) by Day.timestamp=timebucket(ts,''1d'')
+
+    | sort -Day.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-01
+  title: Okta Country City Summary
+  notes: Okta country/city summary. Treat as supporting attribution, not sole proof of physical location.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'') client.geographicalContext.country=*
+
+    | let ts=(timestamp || published || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), IPs=array_agg_distinct(client.ipAddress,20), ASOrgs=array_agg_distinct(securityContext.asOrg,10), ProxyFlags=array_agg_distinct(securityContext.isProxy,5) by Country=client.geographicalContext.country, State=client.geographicalContext.state, City=client.geographicalContext.city
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-02
+  title: Okta Clean Human Presence Country Summary
+  notes: Successful human-auth-like Okta events with browser and OS present. Use for country/day counts.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'') outcome.result=''SUCCESS'' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
+
+    | filter eventType contains (''user.session.start'',''user.authentication.sso'',''user.authentication.auth_via_mfa'')
+
+    | group DaysActive=estimate_distinct(timebucket(published,''1d'')), Events=count(), IPs=array_agg_distinct(client.ipAddress,20), ASOrgs=array_agg_distinct(securityContext.asOrg,10), ProxyFlags=array_agg_distinct(securityContext.isProxy,5) by Country=client.geographicalContext.country, State=client.geographicalContext.state, City=client.geographicalContext.city
+
+    | sort -DaysActive
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-03
+  title: Okta MFA Completions by Country
+  notes: MFA completions by country/city. Good supporting evidence that the human user was present during authentication.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'') outcome.result=''SUCCESS'' client.geographicalContext.country=*
+
+    | filter eventType contains (''mfa.factor.verify'',''user.mfa.okta_verify'',''user.authentication.auth_via_mfa'')
+
+    | group DaysActive=estimate_distinct(timebucket(published,''1d'')), Events=count(), Factors=array_agg_distinct(target.displayName,10), IPs=array_agg_distinct(client.ipAddress,20), ASOrgs=array_agg_distinct(securityContext.asOrg,10) by Country=client.geographicalContext.country, City=client.geographicalContext.city
+
+    | sort -DaysActive
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-04
+  title: Okta Daily Country Timeline
+  notes: Daily Okta country timeline for residency and travel pattern review.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'') outcome.result=''SUCCESS'' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
+
+    | filter eventType contains (''user.session.start'',''user.authentication.sso'',''user.authentication.auth_via_mfa'')
+
+    | group Countries=array_agg_distinct(client.geographicalContext.country,10), Cities=array_agg_distinct(client.geographicalContext.city,10), ASOrgs=array_agg_distinct(securityContext.asOrg,10), ProxyFlags=array_agg_distinct(securityContext.isProxy,5), IPs=array_agg_distinct(client.ipAddress,20), Events=count() by Day.timestamp=timebucket(published,''1d'')
+
+    | sort -Day.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-05
+  title: Okta Same Hour Multi Country Activity
+  notes: Flags hours where Okta saw successful activity from more than one country. Review for VPN/proxy, travel, or impossible travel.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'') outcome.result=''SUCCESS'' client.geographicalContext.country=*
+
+    | filter eventType contains (''user.session.start'',''user.authentication.sso'',''user.authentication.auth_via_mfa'')
+
+    | group CountryCount=estimate_distinct(client.geographicalContext.country), Countries=array_agg_distinct(client.geographicalContext.country,10), Cities=array_agg_distinct(client.geographicalContext.city,10), IPs=array_agg_distinct(client.ipAddress,20), ASOrgs=array_agg_distinct(securityContext.asOrg,10), Events=count() by Hour.timestamp=timebucket(published,''1h'')
+
+    | filter CountryCount > 1
+
+    | sort -Hour.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-06
+  title: Okta Proxy VPN Indicators
+  notes: Okta proxy/VPN indicators from security context and IP chain metadata.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'')
+
+    | filter securityContext.isProxy = true OR request.ipChain.ipDetails.isProxy = true
+
+    | group Events=count(), Countries=array_agg_distinct(client.geographicalContext.country,10), ProxyIPs=array_agg_distinct(request.ipChain.ip,10), ASOrgs=array_agg_distinct(securityContext.asOrg,10) by Day.timestamp=timebucket(published,''1d'')
+
+    | sort -Day.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-okta-07
+  title: Full Raw Okta Timeline
+  notes: Raw Okta timeline with IP, country, AS org, proxy, OS, browser, and IP chain fields.
+  pq: 'serverHost=''okta'' actor.alternateId contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || published || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, Actor=actor.alternateId, EventType=eventType, Result=outcome.result, ClientIP=client.ipAddress, ChainIP=request.ipChain.ip, Country=client.geographicalContext.country, ChainCountry=request.ipChain.geographicalContext.country, City=client.geographicalContext.city, State=client.geographicalContext.state, ASOrg=securityContext.asOrg, ChainASOrg=request.ipChain.ipDetails.asOrg, IsProxy=securityContext.isProxy, ChainIsProxy=request.ipChain.ipDetails.isProxy, OS=client.userAgent.os, Browser=client.userAgent.browser, RawUA=client.userAgent.rawUserAgent'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zpa-01
+  title: ZPA Identity Field Check
+  notes: Checks which ZPA identity fields match email or username so later ZPA results can be trusted.
+  pq: 'serverHost=''zscaler''
+
+    | filter actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{entity}}'')
+
+    | let ts=(TimestampConnectionStart || timestamp || event.time || sca:ingestTime)
+
+    | group Events=count(), LastSeen.timestamp=max(ts) by ActorEmail=actor.email, Username, EventUsers=event.users
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zpa-02
+  title: ZPA Client Public IP Country Summary
+  notes: ZPA client public IP country/city summary. Strong supporting evidence for network location.
+  pq: 'serverHost=''zscaler''
+
+    | filter actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{entity}}'')
+
+    | filter ClientCountryCode != null AND ClientCountryCode != ''''
+
+    | let ts=(TimestampConnectionStart || timestamp || event.time || sca:ingestTime)
+
+    | group Sessions=count(), DaysActive=estimate_distinct(timebucket(ts,''1d'')), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), PublicIPs=array_agg_distinct(ClientPublicIP,20), PrivateIPs=array_agg_distinct(ClientPrivateIP,20), Apps=array_agg_distinct(Application,20) by CountryCode=ClientCountryCode, City=ClientCity
+
+    | sort -DaysActive
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zpa-03
+  title: ZPA Daily Location Timeline
+  notes: Daily ZPA countries, public IPs, private IPs, and accessed apps.
+  pq: 'serverHost=''zscaler''
+
+    | filter actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{entity}}'')
+
+    | filter ClientCountryCode != null AND ClientCountryCode != ''''
+
+    | let ts=(TimestampConnectionStart || timestamp || event.time || sca:ingestTime)
+
+    | group Countries=array_agg_distinct(ClientCountryCode,10), PublicIPs=array_agg_distinct(ClientPublicIP,20), PrivateIPs=array_agg_distinct(ClientPrivateIP,20), Apps=array_agg_distinct(Application,20), Sessions=count() by Day.timestamp=timebucket(ts,''1d'')
+
+    | sort -Day.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zpa-04
+  title: ZPA High Volume Sessions
+  notes: High byte ZPA sessions by client country/city and app. Useful for work-session corroboration.
+  pq: 'serverHost=''zscaler''
+
+    | filter actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{entity}}'')
+
+    | filter ZENTotalBytesTxClient > 10000000
+
+    | let ts=(TimestampConnectionStart || timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, ActorEmail=actor.email, Username, EventUsers=event.users, Country=ClientCountryCode, City=ClientCity, ClientPublicIP, ClientPrivateIP, App=Application, AppGroup, BytesSent=ZENTotalBytesTxClient, BytesRecv=ZENTotalBytesRxClient, Status=ConnectionStatus, Reason=InternalReason'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zpa-05
+  title: ZPA Expected Country Drilldown
+  notes: Drilldown for expected country code. Default placeholder is {{expected_country_code}}, for example GB.
+  pq: 'serverHost=''zscaler''
+
+    | filter actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{entity}}'')
+
+    | filter ClientCountryCode = ''{{expected_country_code}}''
+
+    | let ts=(TimestampConnectionStart || timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, ActorEmail=actor.email, Username, EventUsers=event.users, Country=ClientCountryCode, City=ClientCity, ClientPublicIP, ClientPrivateIP, Lat=ClientLatitude, Lon=ClientLongitude, App=Application, AppGroup, BytesSent=ZENTotalBytesTxClient, BytesRecv=ZENTotalBytesRxClient, Status=ConnectionStatus, Reason=InternalReason'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zpa-06
+  title: Raw ZPA Session Timeline
+  notes: Raw ZPA timeline for public IP and country attribution.
+  pq: 'serverHost=''zscaler''
+
+    | filter actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{entity}}'')
+
+    | let ts=(TimestampConnectionStart || timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, ActorEmail=actor.email, Username, EventUsers=event.users, Country=ClientCountryCode, City=ClientCity, ClientPublicIP, ClientPrivateIP, Lat=ClientLatitude, Lon=ClientLongitude, App=Application, AppGroup, BytesSent=ZENTotalBytesTxClient, BytesRecv=ZENTotalBytesRxClient, Status=ConnectionStatus, Reason=InternalReason'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-01
+  title: Recent Endpoint IP Connections
+  notes: Raw IP Connect events for target endpoint/agent. Strong endpoint-native evidence.
+  pq: '| filter((endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'') AND event.type == ''IP Connect'')
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Time.timestamp=ts, EventID=event.id, AgentUUID=agent.uuid, Endpoint=endpoint.name, Storyline=src.process.storyline.id, User=src.process.user, Cmdline=src.process.cmdline, ImagePath=src.process.image.path, Direction=event.network.direction, Protocol=event.network.protocolName, Status=event.network.connectionStatus, SrcIP=src.ip.address, SrcPort=src.port.number, DstIP=dst.ip.address, DstPort=dst.port.number'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-02
+  title: Daily Endpoint Native LAN Evidence
+  notes: Daily local source-IP evidence for device presence. Use for defensible day counting.
+  pq: '| filter((endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'') AND event.type == ''IP Connect'' AND src.ip.address=*)
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | group Events=count(), SrcIPs=array_agg_distinct(src.ip.address,50), DstIPs=array_agg_distinct(dst.ip.address,100), Processes=array_agg_distinct(src.process.image.path,50) by Day.timestamp=timebucket(ts,''1d''), Endpoint=endpoint.name, User=src.process.user
+
+    | sort Day.timestamp, Endpoint
+
+    | limit 2000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-03
+  title: LAN Source IP Fingerprint Summary
+  notes: Recurring private/source IP fingerprint by endpoint and user.
+  pq: '| filter((endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'') AND event.type == ''IP Connect'' AND src.ip.address=*)
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Days=estimate_distinct(timebucket(ts,''1d'')), Events=count(), Processes=array_agg_distinct(src.process.image.path,25), DstIPs=array_agg_distinct(dst.ip.address,50) by Endpoint=endpoint.name, User=src.process.user, SrcIP=src.ip.address
+
+    | sort -Days
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-04
+  title: Local LAN Discovery Evidence
+  notes: mDNS/NetBIOS/local discovery traffic that supports physical LAN presence.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'')
+
+    | filter(src.process.name contains:anycase(''netbiosd'') OR src.process.image.path contains:anycase(''netbiosd'') OR dst.port.number in (137,138,5353) OR dst.ip.address in (''224.0.0.251'',''ff02::fb''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | group Days=estimate_distinct(timebucket(ts,''1d'')), Events=count(), SrcIPs=array_agg_distinct(src.ip.address,50), DstIPs=array_agg_distinct(dst.ip.address,100) by Endpoint=endpoint.name, User=src.process.user
+
+    | sort -Days
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-05
+  title: Local Private Network Targets
+  notes: Private RFC1918 LAN targets reached by the endpoint. Helpful for network-context evidence.
+  pq: '| filter((endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'') AND event.type == ''IP Connect'')
+
+    | filter((dst.port.number == 7000 OR event.network.protocolName == ''mdns'' OR dst.port.number in (137,138,5353)) AND (dst.ip.address contains ''192.168.'' OR dst.ip.address contains ''10.'' OR dst.ip.address contains ''172.16.'' OR dst.ip.address contains ''172.17.'' OR dst.ip.address contains ''172.18.'' OR dst.ip.address contains ''172.19.'' OR dst.ip.address contains ''172.20.'' OR dst.ip.address contains ''172.21.'' OR dst.ip.address contains ''172.22.'' OR dst.ip.address contains ''172.23.'' OR dst.ip.address contains ''172.24.'' OR dst.ip.address contains ''172.25.'' OR dst.ip.address contains ''172.26.'' OR dst.ip.address contains ''172.27.'' OR dst.ip.address contains ''172.28.'' OR dst.ip.address contains ''172.29.'' OR dst.ip.address contains ''172.30.'' OR dst.ip.address contains ''172.31.''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Events=count(), Ports=array_agg_distinct(dst.port.number,20), SourceIPs=array_agg_distinct(src.ip.address,20), Processes=array_agg_distinct(src.process.image.path,20) by Day.timestamp=timebucket(ts,''1d''), LocalTargetIP=dst.ip.address
+
+    | sort -Day.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-06
+  title: Non Zscaler Outgoing Connections
+  notes: Outgoing endpoint connections excluding Zscaler processes. Useful for local network and direct egress review.
+  pq: '| filter((endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'') AND event.type == ''IP Connect'' AND event.network.direction == ''OUTGOING'')
+
+    | filter(!(src.process.image.path contains:anycase ''Zscaler''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Time.timestamp=ts, Endpoint=endpoint.name, User=src.process.user, ImagePath=src.process.image.path, Cmdline=src.process.cmdline, SrcIP=src.ip.address, SrcPort=src.port.number, DstIP=dst.ip.address, DstPort=dst.port.number, Protocol=event.network.protocolName, Status=event.network.connectionStatus'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-07
+  title: VPN Tunnel Process Evidence
+  notes: Endpoint process evidence of VPN/tunnel tooling, including Zscaler and personal VPN tools.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'' OR src.process.user contains:anycase(''{{username}}''))
+
+    | filter(src.process.image.path contains:anycase(''globalprotect'',''vpn'',''forticlient'',''openvpn'',''nordvpn'',''expressvpn'',''mullvad'',''wireguard'',''zscaler'',''anyconnect'') OR src.process.cmdline contains:anycase(''vpn'',''tunnel'',''globalprotect'',''anyconnect'',''zscaler'') OR src.process.name contains:anycase(''globalprotect'',''vpn'',''forticlient'',''openvpn'',''nordvpn'',''expressvpn'',''mullvad'',''wireguard'',''zscaler'',''anyconnect''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, EventType=event.type, Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, ImagePath=src.process.image.path, Cmdline=src.process.cmdline'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-edr-08
+  title: Interactive Endpoint Activity
+  notes: Login, unlock, loginwindow, and similar interactive endpoint evidence.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'' OR src.process.user contains:anycase(''{{username}}'') OR event.login.userName contains:anycase(''{{username}}''))
+
+    | filter(event.type contains:anycase(''logon'') OR event.type contains:anycase(''login'') OR event.type contains:anycase(''unlock'') OR src.process.cmdline contains:anycase(''unlock'') OR src.process.cmdline contains:anycase(''loginwindow'') OR event.login.userName=*)
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Time.timestamp=ts, Endpoint=endpoint.name, User=src.process.user, LoginUser=event.login.userName, EventType=event.type, Process=src.process.name, Cmdline=src.process.cmdline'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-art-01
+  title: Windows Timezone Registry Changes
+  notes: Windows timezone registry evidence. Useful when available; absence is not conclusive.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'' OR src.process.user contains:anycase(''{{username}}''))
+
+    | filter(event.type contains:anycase(''Registry'') OR event.type == ''Registry Modification'')
+
+    | filter(tgt.registry.keyPath contains:anycase(''TimeZoneInformation''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, Endpoint=endpoint.name, AgentUUID=agent.uuid, User=src.process.user, RegKey=tgt.registry.keyPath, Value=tgt.registry.value, Process=src.process.name'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-art-02
+  title: Windows WLAN Network Profile Registry Writes
+  notes: Windows WLAN/network profile registry writes may indicate network changes or new Wi-Fi profiles.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'' OR src.process.user contains:anycase(''{{username}}''))
+
+    | filter(event.type contains:anycase(''Registry'') OR event.type == ''Registry Modification'')
+
+    | filter(tgt.registry.keyPath contains:anycase(''NetworkList'',''Profiles'',''WlanSvc''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, Endpoint=endpoint.name, AgentUUID=agent.uuid, User=src.process.user, RegKey=tgt.registry.keyPath, Value=tgt.registry.value, Process=src.process.name'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-art-03
+  title: macOS Timezone Artifacts
+  notes: macOS timezone/localtime file evidence.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'' OR src.process.user contains:anycase(''{{username}}''))
+
+    | filter(event.type in:anycase(''File Modification'',''File Creation''))
+
+    | filter(tgt.file.path contains:anycase(''/Library/Preferences/com.apple.timezone'',''/etc/localtime'',''timezone''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, Process=src.process.name'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-art-04
+  title: macOS WiFi Airport Preference Changes
+  notes: macOS Wi-Fi preference changes and known network files.
+  pq: '| filter(endpoint.name contains:anycase(''{{hostname}}'') OR agent.uuid == ''{{agent_uuid}}'' OR src.process.user contains:anycase(''{{username}}''))
+
+    | filter(event.type in:anycase(''File Modification'',''File Creation''))
+
+    | filter(tgt.file.path contains:anycase(''com.apple.wifi.known-networks'',''com.apple.airport.preferences'',''NetworkInterfaces''))
+
+    | let ts=(timestamp || event.time || published || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 1000
+
+    | columns Time.timestamp=ts, Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, Process=src.process.name'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zia-01
+  title: ZIA User Country Summary
+  notes: ZIA country summary by destination country and device hostname. Supports web-location review but may reflect destination country, not user physical country.
+  pq: 'serverHost=''zia'' event.user contains:anycase(''{{entity}}'')
+
+    | let ts=(event.datetime || timestamp || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), UploadBytes=sum(event.outbytes || 0), DownloadBytes=sum(event.inbytes || 0), Apps=array_agg_distinct(event.appname,20) by DestCountry=event.destcountry, Device=event.devicehostname
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-zia-02
+  title: ZIA Raw User Timeline
+  notes: Raw ZIA timeline for subject user with device, app, destination country, and URL details.
+  pq: 'serverHost=''zia'' event.user contains:anycase(''{{entity}}'')
+
+    | let ts=(event.datetime || timestamp || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, User=event.user, Device=event.devicehostname, DeviceOwner=event.deviceowner, Host=event.hostname, Url=event.url, App=event.appname, Category=event.urlcategory, DestCountry=event.destcountry, Action=event.action, Rule=event.rulelabel, InBytes=event.inbytes, OutBytes=event.outbytes, ClientIP=event.ClientIP'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-azure-01
+  title: Azure Sign In Country Summary
+  notes: Azure/M365 app access by country/city and app.
+  pq: 'serverHost=''Azure'' UserPrincipalName contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || createdDateTime || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), IPs=array_agg_distinct(IPAddress,20), Apps=array_agg_distinct(AppDisplayName,20), Devices=array_agg_distinct(DeviceDetail.displayName,20) by Country=LocationDetails.countryOrRegion, City=LocationDetails.city
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-azure-02
+  title: Azure Raw Sign In Timeline
+  notes: Raw Azure sign-in timeline for user, app, IP, device, country, and result.
+  pq: 'serverHost=''Azure'' UserPrincipalName contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || createdDateTime || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, User=UserPrincipalName, App=AppDisplayName, IP=IPAddress, City=LocationDetails.city, Country=LocationDetails.countryOrRegion, Status=ResultType, Device=DeviceDetail.displayName, OS=DeviceDetail.operatingSystem'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-slack-01
+  title: Slack Location and Device Summary
+  notes: Slack activity by IP/location/user agent. Useful for mobile or personal-device corroboration.
+  pq: 'serverHost=''slack'' actor.user.email contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Actions=array_agg_distinct(action,20), UserAgents=array_agg_distinct(context.ua,20) by IP=context.ip_address, Location=context.location.name
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-slack-02
+  title: Slack Raw Timeline
+  notes: Raw Slack activity with IP, location, user agent, and action.
+  pq: 'serverHost=''slack'' actor.user.email contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, Actor=actor.user.email, Action=action, IP=context.ip_address, Location=context.location.name, UA=context.ua, Entity=entity.name, File=entity.file.name'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-slack-03
+  title: Slack Auth Session Timeline
+  notes: Slack auth/session events only. Better for location corroboration than generic file/channel activity.
+  pq: 'serverHost=''slack'' actor.user.email contains:anycase(''{{entity}}'')
+
+    | filter action in (''user_login'',''user_login_failed'',''user_logout'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 3000
+
+    | columns Time.timestamp=ts, Actor=actor.user.email, Action=action, IP=context.ip_address, Location=context.location.name, UA=context.ua'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-gws-01
+  title: Google Workspace IP Region Summary
+  notes: Google Workspace activity by IP/network region. Supportive location signal.
+  pq: 'serverHost=''google_workspace'' actor.email contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || id.time || event.time || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Apps=array_agg_distinct(id.applicationName,20), EventsSeen=array_agg_distinct(event.name,20) by IP=ipAddress, Region=networkInfo.regionCode, Subdivision=networkInfo.subdivisionCode, ASN=networkInfo.ipAsn
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-gws-02
+  title: Google Workspace Raw Timeline
+  notes: Raw Google Workspace activity with app, event, IP, and region fields.
+  pq: 'serverHost=''google_workspace'' actor.email contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || id.time || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, Actor=actor.email, App=id.applicationName, Event=event.name, IP=ipAddress, Region=networkInfo.regionCode, Subdivision=networkInfo.subdivisionCode, ASN=networkInfo.ipAsn, DocTitle=event.doc_title, DocID=event.doc_id'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-sfd-01
+  title: Salesforce Location Summary
+  notes: Salesforce activity by source IP and user. Use if Salesforce telemetry exists for the subject.
+  pq: 'serverHost in (''salesforce-realtime'',''salesforce_event'',''salesforce_audit'')
+
+    | filter detail.payload.Username contains:anycase(''{{entity}}'') OR username contains:anycase(''{{username}}'') OR USER_ID contains:anycase(''{{sf_user_id}}'') OR USER_ID_DERIVED contains:anycase(''{{sf_user_id}}'')
+
+    | let ts=(detail.payload.EventDate || TIMESTAMP_DERIVED || CreatedDate || time || timestamp || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventTypes=array_agg_distinct(detail-type || EVENT_TYPE || Action,20) by Source=serverHost, IP=(detail.payload.SourceIp || CLIENT_IP || serverIP)
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-travel-01
+  title: Navan Travel Timeline
+  notes: Travel bookings used to corroborate legitimate travel or explain foreign-location activity.
+  pq: 'serverHost=''navan-travel-bookings''
+
+    | filter passengers.person.email contains:anycase(''{{entity}}'') OR passengers.person.email contains:anycase(''{{username}}'') OR loggedAsUserName contains:anycase(''{{username}}'') OR booker.email contains:anycase(''{{entity}}'') OR booker.email contains:anycase(''{{username}}'')
+
+    | let ts=(timestamp || created || lastModified || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Created.timestamp=ts, TripName=tripName, BookingType=bookingType, Status=bookingStatus, Vendor=vendor, Start=startDate, End=endDate, From=origin.city, To=destination.city, CompanyOffice=companyOffice, Purpose=purpose, Reason=reason, LoggedAsUser=loggedAsUserName, Booker=booker.email, Passenger=passengers.person.email'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-travel-02
+  title: Navan Route Summary
+  notes: Route-level travel summary for timeline reconciliation.
+  pq: 'serverHost=''navan-travel-bookings''
+
+    | filter passengers.person.email contains:anycase(''{{entity}}'') OR passengers.person.email contains:anycase(''{{username}}'') OR loggedAsUserName contains:anycase(''{{username}}'') OR booker.email contains:anycase(''{{entity}}'') OR booker.email contains:anycase(''{{username}}'')
+
+    | group Bookings=count(), TripNames=array_agg_distinct(tripName,10), Statuses=array_agg_distinct(bookingStatus,10), Purposes=array_agg_distinct(purpose,10), CompanyOffices=array_agg_distinct(companyOffice,10) by Start=startDate, End=endDate, From=origin.city, To=destination.city
+
+    | sort Start
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-workday-01
+  title: Workday HR Location Context
+  notes: Workday/HR context for employment and location-related activity when available.
+  pq: 'serverHost in (''workday'',''workday-location'',''workday_employment_logs'')
+
+    | filter userName contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR target contains:anycase(''{{username}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Time.timestamp=ts, Source=serverHost, User=userName, Action=activityAction, Task=taskDisplayName, Target=target, IP=ipAddress, Auth=authenticationType, SystemAccount=systemAccount'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-phys-01
+  title: Physical Badge Access Timeline
+  notes: Primary office-presence source. Shows when the subject badged into office locations.
+  pq: 'serverHost=''acm_xml''
+
+    | let User=plasectrxFname+''.''+plasectrxLname
+
+    | let Location=plasectrxIdentitySiteLocation
+
+    | filter User contains:anycase(''{{username}}'')
+
+    | let ts=(timestamp || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Time.timestamp=ts, User, Location, Detail=plasectrxEvent'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-phys-02
+  title: Physical Badge Daily Location Summary
+  notes: Daily office-presence summary by location and event type.
+  pq: 'serverHost=''acm_xml''
+
+    | let User=plasectrxFname+''.''+plasectrxLname
+
+    | let Location=plasectrxIdentitySiteLocation
+
+    | filter User contains:anycase(''{{username}}'')
+
+    | let ts=(timestamp || sca:ingestTime)
+
+    | group Events=count(), EventTypes=array_agg_distinct(plasectrxEvent,20), Locations=array_agg_distinct(Location,20) by Day.timestamp=timebucket(ts,''1d'')
+
+    | sort -Day.timestamp
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-phys-03
+  title: Physical and Okta Presence Correlation
+  notes: Compares badge access with Okta city/country on the same timeline. Useful for contradiction review.
+  pq: "| union\n  (serverHost='acm_xml'\n   | let User=plasectrxFname+'.'+plasectrxLname\n   | let ts=(timestamp || sca:ingestTime)\n   | let Details=plasectrxIdentitySiteLocation\n   | filter User contains:anycase('{{username}}')\n   | columns timestamp=ts, Type='Physical', User, Details),\n  (serverHost='okta'\n   | let User=actor.displayName\n   | let ts=(published || timestamp || sca:ingestTime)\n   | let Details=client.geographicalContext.city+', '+client.geographicalContext.country\n   | filter actor.alternateId == '{{entity}}'\n   | columns timestamp=ts, Type='Remote', User, Details)\n| sort -timestamp\n| limit 2000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-atl-01
+  title: Atlassian Location Summary
+  notes: Atlassian login and activity by source IP and location context.
+  pq: 'serverHost=''atlassian-cloud-enterprise''
+
+    | filter attributes.actor.email contains:anycase(''{{entity}}'') OR attributes.actor.name contains:anycase(''{{username}}'')
+
+    | let ts=(attributes.time || timestamp || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Actions=array_agg_distinct(attributes.action,20) by IP=attributes.location.ip, City=attributes.location.city, Region=attributes.location.regionName, Country=attributes.location.countryName
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-atl-02
+  title: Atlassian Raw Location Timeline
+  notes: Raw Atlassian location timeline for login/export/download review.
+  pq: 'serverHost=''atlassian-cloud-enterprise''
+
+    | filter attributes.actor.email contains:anycase(''{{entity}}'') OR attributes.actor.name contains:anycase(''{{username}}'')
+
+    | let ts=(attributes.time || timestamp || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, Actor=attributes.actor.email, Action=attributes.action, IP=attributes.location.ip, City=attributes.location.city, Region=attributes.location.regionName, Country=attributes.location.countryName, Details=message.content'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-box-01
+  title: Box Source IP Summary
+  notes: Box file and auth activity by source IP for user-location corroboration.
+  pq: 'serverHost=''box'' created_by.login contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Actions=array_agg_distinct(event_type,20), Items=array_agg_distinct(source.item_name,20) by IP=ip_address
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-gh-01
+  title: GitHub Source IP Summary
+  notes: GitHub actor IP summary for off-network or unusual-location corroboration.
+  pq: 'serverHost in (''github_s3'',''ghe_server_prod'')
+
+    | filter actor contains:anycase(''{{username}}'') OR gh.actor.login contains:anycase(''{{username}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | let User=(actor || gh.actor.login)
+
+    | let IP=(actor_ip || actor.ip)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Actions=array_agg_distinct(action,20), Repos=array_agg_distinct(repo,20) by User, IP
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-jc-01
+  title: JumpCloud Auth IP Summary
+  notes: JumpCloud login/auth source IP summary for Linux or contractor device populations.
+  pq: 'serverHost=''jumpcloud''
+
+    | filter initiated_by.email contains:anycase(''{{entity}}'') OR username contains:anycase(''{{username}}'') OR resource.email contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventTypes=array_agg_distinct(event_type,20) by IP=client_ip
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-aws-01
+  title: CloudTrail Source IP Summary
+  notes: AWS console and API source IP summary for cloud-access location corroboration.
+  pq: 'serverHost in (''aws'',''nglz-cloudtrail'',''OW-CloudTrail'')
+
+    | filter userIdentity.userName contains:anycase(''{{username}}'') OR userIdentity.arn contains:anycase(''{{username}}'') OR userIdentity.userName contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventNames=array_agg_distinct(eventName,20), UserTypes=array_agg_distinct(userIdentity.type,10) by IP=sourceIPAddress
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-1pw-01
+  title: 1Password Session Location Timeline
+  notes: Optional corroboration if 1Password telemetry is present. Useful for session IP, device, and city/country.
+  pq: 'serverHost=''1password''
+
+    | let User=replace(string(actor_details.email)+string(user.email)+string(actor.email),''null'','''')
+
+    | let IP=replace(string(client.ip_address)+string(session.ip),''null'','''')
+
+    | let Device=replace(string(client.platform_name)+'' ''+string(client.platform_version),''null'','''')
+
+    | let UA=replace(string(client.app_name)+'' ''+string(client.app_version)+'' ''+string(client.os_name)+'' ''+string(client.os_version),''null'','''')
+
+    | let Location=replace(string(location.city)+'', ''+string(location.region)+'', ''+string(location.country),''null'','''')
+
+    | filter User contains:anycase(''{{entity}}'')
+
+    | let ts=(timestamp || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 3000
+
+    | columns Time.timestamp=ts, User, Action=action, IP, Device, Location, UA, SessionUUID=session.uuid, SessionDevice=session.device_uuid'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-report-01
+  title: Multi Source Daily Country Evidence
+  notes: Combined daily country evidence from Okta and ZPA. Use as a reporting starter, then validate with endpoint and physical badge evidence.
+  pq: "| union\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') outcome.result='SUCCESS' client.geographicalContext.country=* | filter eventType contains ('user.session.start','user.authentication.sso','user.authentication.auth_via_mfa') | columns ts=(published || timestamp), Source='Okta', Country=client.geographicalContext.country, City=client.geographicalContext.city, IP=client.ipAddress),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Source='ZPA', Country=ClientCountryCode, City=ClientCity, IP=ClientPublicIP),\n  (serverHost='acm_xml' | let User=plasectrxFname+'.'+plasectrxLname | filter User contains:anycase('{{username}}') | columns ts=(timestamp || sca:ingestTime), Source='Badge', Country='Office', City=plasectrxIdentitySiteLocation, IP='')\n| filter ts != null\n| group Sources=array_agg_distinct(Source,10), Countries=array_agg_distinct(Country,10), Cities=array_agg_distinct(City,10), IPs=array_agg_distinct(IP,20), Events=count() by Day.timestamp=timebucket(ts,'1d')\n| sort -Day.timestamp\n| limit 1000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-pubip-01
+  title: Combined Public IP Daily Summary
+  notes: Daily public IP rollup from Okta, ZPA, Azure, Slack, Box, GitHub, Atlassian, AWS, JumpCloud, and 1Password where available. Use to identify stable home networks, travel networks, VPNs, and country changes.
+  pq: "| union\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') | columns ts=(published || timestamp), Source='Okta', User=actor.alternateId, IP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, Detail=eventType),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Source='ZPA', User=(actor.email || Username || event.users), IP=ClientPublicIP, Country=ClientCountryCode, City=ClientCity, Detail=Application),\n  (serverHost='Azure' UserPrincipalName contains:anycase('{{entity}}') | columns ts=(createdDateTime || timestamp), Source='Azure', User=UserPrincipalName, IP=IPAddress, Country=LocationDetails.countryOrRegion, City=LocationDetails.city, Detail=AppDisplayName),\n  (serverHost='slack' actor.user.email contains:anycase('{{entity}}') | columns ts=timestamp, Source='Slack', User=actor.user.email, IP=context.ip_address, Country='', City=context.location.name, Detail=action),\n  (serverHost='box' created_by.login contains:anycase('{{entity}}') | columns ts=timestamp, Source='Box', User=created_by.login, IP=ip_address, Country='', City='', Detail=event_type),\n  (serverHost='atlassian-cloud-enterprise' | filter attributes.actor.email contains:anycase('{{entity}}') OR attributes.actor.name contains:anycase('{{username}}') | columns ts=(attributes.time || timestamp), Source='Atlassian', User=attributes.actor.email, IP=attributes.location.ip, Country=attributes.location.countryName, City=attributes.location.city, Detail=attributes.action),\n  (serverHost in ('github_s3','ghe_server_prod') | filter actor contains:anycase('{{username}}') OR gh.actor.login contains:anycase('{{username}}') | columns ts=timestamp, Source='GitHub', User=(actor || gh.actor.login), IP=(actor_ip || actor.ip), Country='', City='', Detail=action),\n  (serverHost='jumpcloud' | filter initiated_by.email contains:anycase('{{entity}}') OR username contains:anycase('{{username}}') OR resource.email contains:anycase('{{entity}}') | columns ts=timestamp, Source='JumpCloud', User=(initiated_by.email || username || resource.email), IP=client_ip, Country='', City='', Detail=event_type),\n  (serverHost in ('aws','nglz-cloudtrail','OW-CloudTrail') | filter userIdentity.userName contains:anycase('{{username}}') OR userIdentity.arn contains:anycase('{{username}}') OR userIdentity.userName contains:anycase('{{entity}}') | columns ts=timestamp, Source='CloudTrail', User=(userIdentity.userName || userIdentity.arn), IP=sourceIPAddress, Country='', City='', Detail=eventName),\n  (serverHost='1password' | let User=replace(string(actor_details.email)+string(user.email)+string(actor.email),'null','') | filter User contains:anycase('{{entity}}') | columns ts=timestamp, Source='1Password', User, IP=(client.ip_address || session.ip), Country=location.country, City=location.city, Detail=action)\n| filter ts != null\n| group Sources=array_agg_distinct(Source,20), Countries=array_agg_distinct(Country,20), Cities=array_agg_distinct(City,20), Details=array_agg_distinct(Detail,20), Events=count() by Day.timestamp=timebucket(ts,'1d'), IP\n| sort -Day.timestamp\n| limit 5000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-pubip-02
+  title: Public IP Stability and First Last Seen
+  notes: Summarizes each public IP across all supported remote sources with days active and source systems. Useful for residency pattern review and recurring-network evidence.
+  pq: "| union\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') | columns ts=(published || timestamp), Source='Okta', IP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Source='ZPA', IP=ClientPublicIP, Country=ClientCountryCode, City=ClientCity),\n  (serverHost='Azure' UserPrincipalName contains:anycase('{{entity}}') | columns ts=(createdDateTime || timestamp), Source='Azure', IP=IPAddress, Country=LocationDetails.countryOrRegion, City=LocationDetails.city),\n  (serverHost='slack' actor.user.email contains:anycase('{{entity}}') | columns ts=timestamp, Source='Slack', IP=context.ip_address, Country='', City=context.location.name),\n  (serverHost='box' created_by.login contains:anycase('{{entity}}') | columns ts=timestamp, Source='Box', IP=ip_address, Country='', City=''),\n  (serverHost='atlassian-cloud-enterprise' | filter attributes.actor.email contains:anycase('{{entity}}') OR attributes.actor.name contains:anycase('{{username}}') | columns ts=(attributes.time || timestamp), Source='Atlassian', IP=attributes.location.ip, Country=attributes.location.countryName, City=attributes.location.city)\n| filter ts != null AND IP != null AND IP != ''\n| group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), Days=estimate_distinct(timebucket(ts,'1d')), Sources=array_agg_distinct(Source,20), Countries=array_agg_distinct(Country,20), Cities=array_agg_distinct(City,20), Events=count() by IP\n| sort -Days\n| limit 1000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-report-02
+  title: Remote Evidence Outside Expected Country
+  notes: Shows days where Okta or ZPA remote evidence indicates activity outside {{expected_country_code}}. For UK use GB.
+  pq: "| union\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') outcome.result='SUCCESS' client.geographicalContext.country=* | filter eventType contains ('user.session.start','user.authentication.sso','user.authentication.auth_via_mfa') | columns ts=(published || timestamp), Source='Okta', Country=client.geographicalContext.country, City=client.geographicalContext.city, IP=client.ipAddress),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Source='ZPA', Country=ClientCountryCode, City=ClientCity, IP=ClientPublicIP)\n| filter ts != null AND Country != null AND Country != '' AND Country != '{{expected_country_code}}'\n| group Sources=array_agg_distinct(Source,10), Countries=array_agg_distinct(Country,10), Cities=array_agg_distinct(City,20), IPs=array_agg_distinct(IP,20), Events=count() by Day.timestamp=timebucket(ts,'1d')\n| sort -Day.timestamp\n| limit 1000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-report-03
+  title: Expected Country vs Foreign Country Day Counts
+  notes: Daily and aggregate starter for days in expected country vs outside expected country, based on Okta and ZPA remote evidence. Validate with endpoint and badge sources.
+  pq: "| union\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') outcome.result='SUCCESS' client.geographicalContext.country=* | filter eventType contains ('user.session.start','user.authentication.sso','user.authentication.auth_via_mfa') | columns ts=(published || timestamp), Source='Okta', Country=client.geographicalContext.country),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Source='ZPA', Country=ClientCountryCode)\n| filter ts != null AND Country != null AND Country != ''\n| let CountryBucket=(Country == '{{expected_country_code}}' ? 'Expected Country' : 'Outside Expected Country')\n| group Events=count(), Sources=array_agg_distinct(Source,10), Countries=array_agg_distinct(Country,10) by Day.timestamp=timebucket(ts,'1d'), CountryBucket\n| sort -Day.timestamp\n| limit 2000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-contradiction-01
+  title: Badge Access and Remote Foreign Activity Same Day
+  notes: Flags days where badge access exists and remote Okta/ZPA evidence also shows activity outside {{expected_country_code}}. Review carefully for VPN/proxy, travel, clock skew, shared devices, or badge misuse.
+  pq: "| union\n  (serverHost='acm_xml' | let User=plasectrxFname+'.'+plasectrxLname | filter User contains:anycase('{{username}}') | columns ts=(timestamp || sca:ingestTime), Evidence='Badge', Country='Office', Location=plasectrxIdentitySiteLocation, IP=''),\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') outcome.result='SUCCESS' client.geographicalContext.country=* | filter eventType contains ('user.session.start','user.authentication.sso','user.authentication.auth_via_mfa') | columns ts=(published || timestamp), Evidence='Okta', Country=client.geographicalContext.country, Location=client.geographicalContext.city, IP=client.ipAddress),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Evidence='ZPA', Country=ClientCountryCode, Location=ClientCity, IP=ClientPublicIP)\n| filter ts != null\n| group EvidenceTypes=array_agg_distinct(Evidence,10), Countries=array_agg_distinct(Country,10), Locations=array_agg_distinct(Location,20), IPs=array_agg_distinct(IP,20), Events=count(), ForeignEvents=count(if(Country != '{{expected_country_code}}' AND Country != 'Office' AND Country != '' AND Country != null,1,null)), BadgeEvents=count(if(Evidence == 'Badge',1,null)) by Day.timestamp=timebucket(ts,'1d')\n| filter BadgeEvents > 0 AND ForeignEvents > 0\n| sort -Day.timestamp\n| limit 1000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-contradiction-02
+  title: Endpoint LAN and Foreign Remote Activity Same Day
+  notes: Flags days where endpoint-native LAN activity exists and Okta/ZPA shows foreign remote activity. Useful for identifying VPN/proxy or travel contradictions.
+  pq: "| union\n  (| filter((endpoint.name contains:anycase('{{hostname}}') OR agent.uuid == '{{agent_uuid}}') AND event.type == 'IP Connect' AND src.ip.address=*) | columns ts=(event.time || timestamp), Evidence='EndpointLAN', Country='Endpoint', Location=src.ip.address, IP=src.ip.address),\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') outcome.result='SUCCESS' client.geographicalContext.country=* | filter eventType contains ('user.session.start','user.authentication.sso','user.authentication.auth_via_mfa') | columns ts=(published || timestamp), Evidence='Okta', Country=client.geographicalContext.country, Location=client.geographicalContext.city, IP=client.ipAddress),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Evidence='ZPA', Country=ClientCountryCode, Location=ClientCity, IP=ClientPublicIP)\n| filter ts != null\n| group EvidenceTypes=array_agg_distinct(Evidence,10), Countries=array_agg_distinct(Country,10), Locations=array_agg_distinct(Location,20), IPs=array_agg_distinct(IP,20), Events=count(), ForeignEvents=count(if(Country != '{{expected_country_code}}' AND Country != 'Endpoint' AND Country != '' AND Country != null,1,null)), EndpointEvents=count(if(Evidence == 'EndpointLAN',1,null)) by Day.timestamp=timebucket(ts,'1d')\n| filter EndpointEvents > 0 AND ForeignEvents > 0\n| sort -Day.timestamp\n| limit 1000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-net-01
+  title: DNS or Network Source IP Corroboration
+  notes: Secondary fallback for network corroboration when Zscaler coverage is incomplete. Attribute carefully because DNS/PANW records may be weaker for personnel attribution.
+  pq: 'serverHost in (''dns-query-logs'',''panw'',''pfsense'',''olympus-vpc-flowlogs'',''aws-network-firewall'')
+
+    | filter srcaddr == ''{{ip}}'' OR event.src_ip == ''{{ip}}'' OR SourceAddress == ''{{ip}}'' OR src.ip.address == ''{{ip}}'' OR sourceIPAddress == ''{{ip}}'' OR user contains:anycase(''{{entity}}'') OR login contains:anycase(''{{entity}}'') OR SourceUser contains:anycase(''{{username}}'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), DstIPs=array_agg_distinct(event.dest_ip || DestinationAddress || dst.ip.address,20), Questions=array_agg_distinct(question || event.dns.request,20) by Source=serverHost
+
+    | sort -Events
+
+    | limit 1000'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-report-04
+  title: Complete Evidence Timeline
+  notes: One merged timeline of physical, endpoint, identity, SaaS, travel, and corroborating location evidence. Use for final investigation review and report drafting.
+  pq: "| union\n  (serverHost='acm_xml' | let User=plasectrxFname+'.'+plasectrxLname | filter User contains:anycase('{{username}}') | columns ts=(timestamp || sca:ingestTime), Source='Badge', Evidence='Physical office access', Location=plasectrxIdentitySiteLocation, IP='', Detail=plasectrxEvent),\n  (| filter((endpoint.name contains:anycase('{{hostname}}') OR agent.uuid == '{{agent_uuid}}') AND event.type == 'IP Connect' AND src.ip.address=*) | columns ts=(event.time || timestamp), Source='Endpoint', Evidence='Endpoint LAN/IP activity', Location=src.ip.address, IP=src.ip.address, Detail=dst.ip.address),\n  (serverHost='okta' actor.alternateId contains:anycase('{{entity}}') | columns ts=(published || timestamp), Source='Okta', Evidence=eventType, Location=(client.geographicalContext.city+', '+client.geographicalContext.country), IP=client.ipAddress, Detail=outcome.result),\n  (serverHost='zscaler' | filter actor.email contains:anycase('{{entity}}') OR Username contains:anycase('{{entity}}') OR event.users contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{username}}') | columns ts=(TimestampConnectionStart || timestamp), Source='ZPA', Evidence=Application, Location=(ClientCity+', '+ClientCountryCode), IP=ClientPublicIP, Detail=ConnectionStatus),\n  (serverHost='Azure' UserPrincipalName contains:anycase('{{entity}}') | columns ts=(createdDateTime || timestamp), Source='Azure', Evidence=AppDisplayName, Location=(LocationDetails.city+', '+LocationDetails.countryOrRegion), IP=IPAddress, Detail=ResultType),\n  (serverHost='slack' actor.user.email contains:anycase('{{entity}}') | columns ts=timestamp, Source='Slack', Evidence=action, Location=context.location.name, IP=context.ip_address, Detail=context.ua),\n  (serverHost='navan-travel-bookings' | filter passengers.person.email contains:anycase('{{entity}}') OR passengers.person.email contains:anycase('{{username}}') OR loggedAsUserName contains:anycase('{{username}}') OR booker.email contains:anycase('{{entity}}') | columns ts=(timestamp || created || lastModified), Source='Navan', Evidence='Travel booking', Location=(origin.city+' to '+destination.city), IP='', Detail=tripName)\n| filter ts != null\n| sort -ts\n| limit 10000"
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-gws-login-01
+  title: Google Workspace Login Timeline
+  notes: Dedicated Google Workspace login/auth timeline. Separates real sign-ins from general Workspace activity and helps corroborate Okta, Azure, and travel findings.
+  pq: 'serverHost=''google_workspace'' actor.email contains:anycase(''{{entity}}'')
+
+    | filter id.applicationName == ''login'' OR event.name in:anycase (''login_success'',''login_failure'',''login_challenge'',''login_verification'',''logout'',''suspicious_login'',''suspicious_programmatic_login'')
+
+    | let ts=(timestamp || id.time || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 5000
+
+    | columns Time.timestamp=ts, Actor=actor.email, App=id.applicationName, Event=event.name, IP=ipAddress, Region=networkInfo.regionCode, Subdivision=networkInfo.subdivisionCode, ASN=networkInfo.ipAsn, OAuthApp=actor.applicationInfo.applicationName'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-workdayloc-01
+  title: Workday Location and Signon Detail
+  notes: Dedicated Workday and workday-location query for HR location context and sign-on IP review. Useful for residency/compliance cases where official HR location matters.
+  pq: 'serverHost in (''workday'',''workday-location'')
+
+    | let User=(serverHost == ''workday'' ? System_Account : (firstname + '' '' + lastname))
+
+    | let Action=(serverHost == ''workday'' ? ''Sign On'' : ''Location Update'')
+
+    | let Details=(serverHost == ''workday'' ? Authentication_Type : (''Region: '' + Countryregion))
+
+    | let IP=(serverHost == ''workday'' ? Signon_IP_Address : ''Internal HR System'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | filter User contains:anycase(''{{username}}'') OR User contains:anycase(''{{entity}}'')
+
+    | sort -ts
+
+    | limit 2000
+
+    | columns Time.timestamp=ts, Source=serverHost, User, Action, IP, Details'
+  merge:
+    strategy: append
+  scope: subject
+- id: loc-ns-01
+  title: NetSuite Login IP Timeline
+  notes: NetSuite authentication timeline for ERP users. Useful when the subject touches Finance, Accounting, or FP&A systems and you need another source-IP/location corroboration point.
+  pq: 'serverHost=''netsuite''
+
+    | filter user contains:anycase(''{{entity}}'') OR user contains:anycase(''{{username}}'')
+
+    | filter event_type contains:anycase(''login'',''logout'',''failed'',''sso'')
+
+    | let ts=(timestamp || event.time || sca:ingestTime)
+
+    | sort -ts
+
+    | limit 3000
+
+    | columns Time.timestamp=ts, User=user, EventType=event_type, IP=ip_address, Role=role, RecordType=record_type, RecordID=record_id'
+  merge:
+    strategy: append
+  scope: subject

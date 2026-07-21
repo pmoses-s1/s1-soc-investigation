@@ -226,18 +226,27 @@ def cmd_validate(args: argparse.Namespace) -> int:
                 overrides["rps"] = args.rps
             config = load_config(**overrides)
 
-    lint_total = invalid_total = valid_total = unknown_total = 0
+    from .lint import scope_issues
+    lint_total = invalid_total = valid_total = unknown_total = scope_total = 0
     for label, cat in catalogs:
         if isinstance(cat, Exception):
             print(f"\n== {label} ==\n  PARSE ERROR: {cat}")
             invalid_total += 1
             continue
-        print(f"\n== {label}  ({len(cat.enabled_queries())} queries) ==")
+        counts = cat.scope_counts()
+        print(f"\n== {label}  ({len(cat.enabled_queries())} queries)  "
+              f"[subject {counts['subject']} / pivot {counts['pivot']} / "
+              f"environment {counts['environment']} / coverage {counts['coverage']}] ==")
         lint = lint_catalog(cat)
         for qid, issues in lint.items():
             for msg in issues:
                 print(f"  LINT  {qid}: {msg}")
             lint_total += len(issues)
+        # Scope audit: a subject/pivot query with no matching filter would run
+        # tenant-wide (it is gated at run time, but flag it here too).
+        for qid, msg in scope_issues(cat).items():
+            print(f"  SCOPE {qid}: {msg}")
+            scope_total += 1
         if args.lint_only:
             continue
         results = validate_catalog(config, cat, transport=transport,
@@ -255,11 +264,12 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     print("\n=== validation summary ===")
     print(f"lint issues : {lint_total}")
+    print(f"scope issues: {scope_total} (subject/pivot query with no matching filter)")
     if not args.lint_only:
         print(f"valid       : {valid_total}")
         print(f"invalid     : {invalid_total}")
         print(f"unknown     : {unknown_total} (transient / could not reach SDL)")
-    return 0 if (lint_total == 0 and invalid_total == 0) else 1
+    return 0 if (lint_total == 0 and invalid_total == 0 and scope_total == 0) else 1
 
 
 def _safe(name: str) -> str:

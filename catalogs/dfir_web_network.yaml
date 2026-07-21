@@ -169,7 +169,7 @@ queries:
   title: Disable Events + Blocked Activity Timeline
   notes: 'Correlate ZIA disables with blocked web events. | Source: zia + zia_disable_reason | Pivot if positive: User/device review'
   pq: '| union (serverHost=''zia'' event.action contains:anycase(''block'') | columns timestamp,Type=''Blocked Web Event''), (serverHost=''zia_disable_reason'' | columns timestamp,Type=''ZIA Disabled'') | group count=count() by timestamp=timebucket(''1h''),Type | transpose Type'
-  scope: subject
+  scope: environment
 - id: zia-it-01
   title: Recommended Block Candidates
   notes: 'Rank destinations that may need policy tuning. | Source: zia | Pivot if positive: Policy owner / business justification'
@@ -181,7 +181,7 @@ queries:
   pq: '| union (serverHost=''{{src_zia|zia}}'' event.action contains:anycase(''block'') | columns timestamp,Type=''Blocked Web Event''), (serverHost=''{{src_zia_disable_reason|zia_disable_reason}}'' | columns timestamp,Type=''ZIA Disabled'') | group count=count() by timestamp=timebucket(''1h''),Type | transpose Type'
   merge:
     kind: append
-  scope: subject
+  scope: environment
 - id: net-03-2
   title: Large Egress / Uploads
   notes: 'Source: all | Imported/generated for SOC investigation library.'
