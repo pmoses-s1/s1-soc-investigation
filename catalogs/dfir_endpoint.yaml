@@ -3,195 +3,190 @@ queries:
 - id: edr-01
   title: USB / External Device Writes
   notes: 'Were any files written to a USB or external device? Most direct physical exfil path. | Source: SentinelOne EDR | Pivot if positive: Files written → Google Drive downloads in same window. Archive creation preceding USB?'
-  pq: |-
-    | filter event.type in ('File Creation','File Modification') AND tgt.file.location == 'External Device'
-    | filter src.process.user contains:anycase('{{username}}')
+  pq: '| filter event.type in (''File Creation'',''File Modification'') AND tgt.file.location == ''External Device''
+
+    | filter src.process.user contains:anycase(''{{username}}'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, File=tgt.file.path, Size=tgt.file.size, Cmd=src.process.cmdline
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, File=tgt.file.path, Size=tgt.file.size, Cmd=src.process.cmdline'
+  scope: subject
 - id: edr-02
   title: Archive / Compression Tool Usage
   notes: 'Did the user run 7zip, WinZip, tar, or PowerShell to create archives? Data staging signal. | Source: SentinelOne EDR | Pivot if positive: Archive in Downloads folder → ZIA upload bytes in same window'
-  pq: |-
-    | filter event.type == 'Process Creation'
-    | filter src.process.user contains:anycase('{{username}}') OR tgt.process.user contains:anycase('{{username}}')
-    | filter src.process.name contains:anycase('7z') OR src.process.name contains:anycase('rar') OR src.process.name contains:anycase('winzip') OR src.process.name contains:anycase('tar') OR src.process.name contains:anycase('powershell') OR tgt.process.name contains:anycase('7z') OR tgt.process.name contains:anycase('rar') OR tgt.process.cmdline contains:anycase('compress') OR tgt.process.cmdline contains:anycase('archive')
+  pq: '| filter event.type == ''Process Creation''
+
+    | filter src.process.user contains:anycase(''{{username}}'') OR tgt.process.user contains:anycase(''{{username}}'')
+
+    | filter src.process.name contains:anycase(''7z'') OR src.process.name contains:anycase(''rar'') OR src.process.name contains:anycase(''winzip'') OR src.process.name contains:anycase(''tar'') OR src.process.name contains:anycase(''powershell'') OR tgt.process.name contains:anycase(''7z'') OR tgt.process.name contains:anycase(''rar'') OR tgt.process.cmdline contains:anycase(''compress'') OR tgt.process.cmdline contains:anycase(''archive'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 1000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, Cmd=src.process.cmdline
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, Cmd=src.process.cmdline'
+  scope: subject
 - id: edr-03
   title: Cloud Transfer / Exfil Tooling
   notes: 'Did the user run rclone, aws cli, gsutil, curl, wget, or similar transfer tools? | Source: SentinelOne EDR | Pivot if positive: Command line args reveal destination. ZIA log for same timestamp.'
-  pq: |-
-    | filter event.type == 'Process Creation'
-    | filter src.process.user contains:anycase('{{username}}') OR tgt.process.user contains:anycase('{{username}}')
-    | filter src.process.name contains:anycase('rclone') OR src.process.name contains:anycase('aws') OR src.process.name contains:anycase('gsutil') OR src.process.name contains:anycase('curl') OR src.process.name contains:anycase('wget') OR src.process.name contains:anycase('megasync') OR tgt.process.cmdline contains:anycase('rclone') OR tgt.process.cmdline contains:anycase('aws s3') OR tgt.process.cmdline contains:anycase('gsutil') OR tgt.process.cmdline contains:anycase('createUploadSession') OR tgt.process.cmdline contains:anycase('dropboxapi')
+  pq: '| filter event.type == ''Process Creation''
+
+    | filter src.process.user contains:anycase(''{{username}}'') OR tgt.process.user contains:anycase(''{{username}}'')
+
+    | filter src.process.name contains:anycase(''rclone'') OR src.process.name contains:anycase(''aws'') OR src.process.name contains:anycase(''gsutil'') OR src.process.name contains:anycase(''curl'') OR src.process.name contains:anycase(''wget'') OR src.process.name contains:anycase(''megasync'') OR tgt.process.cmdline contains:anycase(''rclone'') OR tgt.process.cmdline contains:anycase(''aws s3'') OR tgt.process.cmdline contains:anycase(''gsutil'') OR tgt.process.cmdline contains:anycase(''createUploadSession'') OR tgt.process.cmdline contains:anycase(''dropboxapi'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 1000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, Cmd=src.process.cmdline
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, Cmd=src.process.cmdline'
+  scope: subject
 - id: edr-04
   title: Large File Creation > 50MB
   notes: 'Did the user create large archives or documents? Catch bulk staging before transfer. | Source: SentinelOne EDR | Pivot if positive: Large archive in staging folder → USB query + ZIA upload in same window'
-  pq: |-
-    | filter event.type in ('File Creation','File Modification')
+  pq: '| filter event.type in (''File Creation'',''File Modification'')
+
     | filter tgt.file.size > 50000000
-    | filter src.process.user contains:anycase('{{username}}')
-    | filter tgt.file.extension in:anycase ('zip','7z','rar','tar','gz','tgz','csv','xlsx','xls','pdf','docx','pptx','json','sql')
+
+    | filter src.process.user contains:anycase(''{{username}}'')
+
+    | filter tgt.file.extension in:anycase (''zip'',''7z'',''rar'',''tar'',''gz'',''tgz'',''csv'',''xlsx'',''xls'',''pdf'',''docx'',''pptx'',''json'',''sql'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 1000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576, Process=src.process.name
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576, Process=src.process.name'
+  scope: subject
 - id: edr-05
   title: Login Events — All Endpoints
   notes: 'What endpoints did the user log into? Identify primary device and any anomalous devices. | Source: SentinelOne EDR | Pivot if positive: Multiple sites/agents → investigate the secondary device. Jun 5 pattern: browser failures then OktaVerify'
-  pq: |-
-    | filter event.type == 'Login' AND event.login.userName contains:anycase('{{username}}')
+  pq: '| filter event.type == ''Login'' AND event.login.userName contains:anycase(''{{username}}'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | group Events=count(), FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), LoginTypes=array_agg_distinct(event.login.type, 5) by Endpoint=endpoint.name, AgentUUID=agent.uuid, Site=site.name
+
     | sort -Events
-    | limit 200
+
+    | limit 200'
+  scope: subject
 - id: edr-06
   title: Print Spool Artifacts
   notes: 'Did the user print documents? Spool files confirm print jobs even if content is unknown. | Source: SentinelOne EDR | Pivot if positive: Print timing → correlate with Google Drive access in same window for likely doc'
-  pq: |-
-    | filter event.type in ('File Creation','File Modification')
-    | filter src.process.user contains:anycase('{{username}}')
-    | filter tgt.file.path contains:anycase('spool') OR tgt.file.extension in:anycase('spl','shd')
+  pq: '| filter event.type in (''File Creation'',''File Modification'')
+
+    | filter src.process.user contains:anycase(''{{username}}'')
+
+    | filter tgt.file.path contains:anycase(''spool'') OR tgt.file.extension in:anycase(''spl'',''shd'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 500
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, Process=src.process.name
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, Process=src.process.name'
+  scope: subject
 - id: edr-07
   title: Downloads / Desktop Temp — Sensitive File Staging
   notes: 'What sensitive files were recently created in Downloads, Desktop, or Temp folders? Final-day staging signal. | Source: SentinelOne EDR | Pivot if positive: File names → Google Drive downloads for same doc titles. ZIA upload bytes in same window'
-  pq: |-
-    | filter event.type in ('File Creation','File Modification')
-    | filter src.process.user contains:anycase('{{username}}')
-    | filter tgt.file.path contains:anycase('\\Downloads\\') OR tgt.file.path contains:anycase('\\Desktop\\') OR tgt.file.path contains:anycase('\\Temp\\') OR tgt.file.path contains:anycase('/Downloads/') OR tgt.file.path contains:anycase('/Desktop/')
-    | filter tgt.file.extension in:anycase ('pdf','docx','xlsx','pptx','csv','zip','7z','rar','pst','msg')
+  pq: '| filter event.type in (''File Creation'',''File Modification'')
+
+    | filter src.process.user contains:anycase(''{{username}}'')
+
+    | filter tgt.file.path contains:anycase(''\\Downloads\\'') OR tgt.file.path contains:anycase(''\\Desktop\\'') OR tgt.file.path contains:anycase(''\\Temp\\'') OR tgt.file.path contains:anycase(''/Downloads/'') OR tgt.file.path contains:anycase(''/Desktop/'')
+
+    | filter tgt.file.extension in:anycase (''pdf'',''docx'',''xlsx'',''pptx'',''csv'',''zip'',''7z'',''rar'',''pst'',''msg'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576, Process=src.process.name
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576, Process=src.process.name'
+  scope: subject
 - id: edr-08
   title: Screenshot / Screen Recording Artifacts
   notes: 'Did the user take screenshots or screen recordings? Could capture sensitive screen content. | Source: SentinelOne EDR | Pivot if positive: Screenshots during Salesforce or confidential doc access = higher concern'
-  pq: |-
-    | filter event.type == 'File Creation'
-    | filter src.process.user contains:anycase('{{username}}')
-    | filter tgt.file.path contains:anycase('Screenshots') OR tgt.file.path contains:anycase('Screen Recordings') OR tgt.file.path contains:anycase('Snips')
-    | filter tgt.file.path matches:anycase ('\.(png|mp4|jpg)$')
+  pq: '| filter event.type == ''File Creation''
+
+    | filter src.process.user contains:anycase(''{{username}}'')
+
+    | filter tgt.file.path contains:anycase(''Screenshots'') OR tgt.file.path contains:anycase(''Screen Recordings'') OR tgt.file.path contains:anycase(''Snips'')
+
+    | filter tgt.file.path matches:anycase (''\.(png|mp4|jpg)$'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 500
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576'
+  scope: subject
 - id: opl-01
   title: Software Inventory by App/Tag
   notes: 'What risky or policy-relevant software exists across endpoints? Uses .timestamp aliases so SDL renders time values as dates. | Source: oplockdown | Pivot if positive: EDR process execution, ZIA, DNS/PANW, user coverage'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | group
-        Endpoints=estimate_distinct(endpoint.name),
-        Users=estimate_distinct(owner),
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by app_name, tag
-    | sort -Endpoints
+  pq: "serverHost='{{src_oplockdown|oplockdown}}'\n| group\n    Endpoints=estimate_distinct(endpoint.name),\n    Users=estimate_distinct(owner),\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby app_name, tag\n| sort -Endpoints"
+  scope: coverage
 - id: opl-02
   title: Newly Observed Software by Endpoint
   notes: 'Which apps first appeared recently on a user or endpoint? | Source: oplockdown | Pivot if positive: EDR process creation by app name; endpoint timeline'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | group
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by app_name, tag, endpoint.name, owner
-    | sort -FirstRecord.timestamp
-    | limit 2000
+  pq: "serverHost='{{src_oplockdown|oplockdown}}' | filter (owner contains:anycase('{{entity}}')) | group\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby app_name, tag, endpoint.name, owner\n| sort -FirstRecord.timestamp\n| limit 2000"
+  scope: subject
 - id: opl-03
   title: High-Risk Software Categories
   notes: 'Show VPN, RemoteManagement, AI, Filesharing, P2P and Games software by scope. | Source: oplockdown | Pivot if positive: OPL-04 endpoint inventory; EDR correlation'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | filter tag in ('VPN','RemoteManagement','AI-MISUSE','AI-IDE','Filesharing','Peer-To-Peer','Games')
-    | group
-        Endpoints=estimate_distinct(endpoint.name),
-        Users=estimate_distinct(owner),
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by app_name, tag
-    | sort -Endpoints
+  pq: "serverHost='{{src_oplockdown|oplockdown}}'\n| filter tag in ('VPN','RemoteManagement','AI-MISUSE','AI-IDE','Filesharing','Peer-To-Peer','Games')\n| group\n    Endpoints=estimate_distinct(endpoint.name),\n    Users=estimate_distinct(owner),\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby app_name, tag\n| sort -Endpoints"
+  scope: environment
 - id: opl-04
   title: Endpoint Software Inventory
   notes: 'For one host, list all known software and tags. | Source: oplockdown | Pivot if positive: EDR process, network, USB, ZIA'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | filter endpoint.name contains:anycase('{{hostname}}')
-    | group
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by endpoint.name, owner, app_name, tag
-    | sort app_name
+  pq: "serverHost='{{src_oplockdown|oplockdown}}'\n| filter endpoint.name contains:anycase('{{hostname}}')\n| group\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby endpoint.name, owner, app_name, tag\n| sort app_name"
+  scope: subject
 - id: opl-05
   title: Software by User / Owner
   notes: 'What policy-relevant apps are mapped to a subject owner? | Source: oplockdown | Pivot if positive: User coverage, endpoint EDR, ZIA upload activity'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | filter owner contains:anycase('{{username}}')
-    | group
-        Endpoints=estimate_distinct(endpoint.name),
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by owner, endpoint.name, app_name, tag
-    | sort -AppLastSeen.timestamp
-    | limit 2000
+  pq: "serverHost='{{src_oplockdown|oplockdown}}'\n| filter owner contains:anycase('{{username}}')\n| group\n    Endpoints=estimate_distinct(endpoint.name),\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby owner, endpoint.name, app_name, tag\n| sort -AppLastSeen.timestamp\n| limit 2000"
+  scope: subject
 - id: opl-06
   title: Orphaned / Unknown Owner Software
   notes: 'Which high-risk apps are installed on endpoints without an owner? | Source: oplockdown | Pivot if positive: Asset inventory, EDR endpoint.name, device owner lookup'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | filter owner == '-' OR owner == '' OR !owner
-    | group
-        Endpoints=estimate_distinct(endpoint.name),
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by app_name, tag, endpoint.name, owner
-    | sort -AppLastSeen.timestamp
-    | limit 2000
+  pq: "serverHost='{{src_oplockdown|oplockdown}}' | filter (owner contains:anycase('{{entity}}')) | filter owner == '-' OR owner == '' OR !owner\n| group\n    Endpoints=estimate_distinct(endpoint.name),\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby app_name, tag, endpoint.name, owner\n| sort -AppLastSeen.timestamp\n| limit 2000"
+  scope: subject
 - id: opl-07
   title: Installed Remote Tool → EDR Execution
   notes: 'If OpLockdown says a remote tool is installed, did EDR see it execute? | Source: EDR / DV | Pivot if positive: Network connections, file writes, process tree'
-  pq: |-
-    event.type in ('Process Creation','Process','Process Start')
-    | let Proc=(process.name || src.process.name || tgt.process.name || '')
-    | let Cmd=(process.cmdline || src.process.cmdline || tgt.process.cmdline || '')
-    | filter Proc contains:anycase('{{app_name}}') OR Cmd contains:anycase('{{app_name}}')
+  pq: 'event.type in (''Process Creation'',''Process'',''Process Start'')
+
+    | let Proc=(process.name || src.process.name || tgt.process.name || '''')
+
+    | let Cmd=(process.cmdline || src.process.cmdline || tgt.process.cmdline || '''')
+
+    | filter Proc contains:anycase(''{{app_name}}'') OR Cmd contains:anycase(''{{app_name}}'')
+
     | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(user.name || src.process.user), Proc, Cmd
+
     | sort -timestamp
-    | limit 2000
+
+    | limit 2000'
+  scope: pivot
 - id: opl-06-2
   title: Orphaned / Unknown Owner Software
   notes: 'Which high-risk apps are installed on endpoints without an owner? | Source: oplockdown | Pivot if positive: Asset inventory, EDR endpoint.name, device owner lookup'
-  pq: |-
-    serverHost='{{src_oplockdown|oplockdown}}'
-    | filter owner == '-' OR !owner OR owner == ''
-    | group
-        Endpoints=estimate_distinct(endpoint.name),
-        FirstRecord.timestamp=min(timestamp),
-        LastRecord.timestamp=max(timestamp),
-        AppLastSeen.timestamp=max(lastseen)
-    by app_name, tag, endpoint.name, owner
-    | sort -AppLastSeen.timestamp
-    | limit 2000
+  pq: "serverHost='{{src_oplockdown|oplockdown}}' | filter (owner contains:anycase('{{entity}}')) | filter owner == '-' OR !owner OR owner == ''\n| group\n    Endpoints=estimate_distinct(endpoint.name),\n    FirstRecord.timestamp=min(timestamp),\n    LastRecord.timestamp=max(timestamp),\n    AppLastSeen.timestamp=max(lastseen)\nby app_name, tag, endpoint.name, owner\n| sort -AppLastSeen.timestamp\n| limit 2000"
   merge:
     kind: aggregate
     key_cols:
@@ -204,6 +199,7 @@ queries:
     max_cols:
     - LastRecord.timestamp
     - AppLastSeen.timestamp
+  scope: subject
 - id: dash-4-remote-access-vpn-p2p-remote-access-vpn-p2p-installed
   title: Remote Access / VPN / P2P Installed
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '4. Remote Access / VPN / P2P'.
@@ -215,12 +211,14 @@ queries:
     - tag
     max_cols:
     - LastSeen.timestamp
+  scope: environment
 - id: dash-7-usb-endpoint-staging-large-archive-creation-50mb
   title: Large Archive Creation >50MB
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '7. USB / Endpoint Staging'.
-  pq: event.type in ('File Creation','File Modification') | filter tgt.file.extension in:anycase('zip','rar','7z','tar','gz','tgz','pst','mbox') | let Size=(tgt.file.size || file.size || 0) | filter Size > 50000000 | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, SizeMB=(Size/1024/1024), Proc=(src.process.name || process.name || src.process.image.path), Cmd=src.process.cmdline | sort -ts.timestamp | limit 3000
+  pq: event.type in ('File Creation','File Modification') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter tgt.file.extension in:anycase('zip','rar','7z','tar','gz','tgz','pst','mbox') | let Size=(tgt.file.size || file.size || 0) | filter Size > 50000000 | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, SizeMB=(Size/1024/1024), Proc=(src.process.name || process.name || src.process.image.path), Cmd=src.process.cmdline | sort -ts.timestamp | limit 3000
   merge:
     kind: append
+  scope: subject
 - id: dash-2-oplockdown-software-risk-software-inventory-by-app-tag
   title: Software Inventory by App / Tag
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '2. OpLockdown Software Risk'.
@@ -235,21 +233,25 @@ queries:
     max_cols:
     - LastRecord.timestamp
     - AppLastSeen.timestamp
+  scope: environment
 - id: dash-2-oplockdown-software-risk-unowned-orphaned-software
   title: Unowned / Orphaned Software
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '2. OpLockdown Software Risk'.
-  pq: serverHost='{{src_oplockdown|oplockdown}}' | filter owner == '-' OR !owner OR owner == '' | columns timestamp, endpoint.name, app_name, tag, severity, LastSeen.timestamp=lastseen | sort -LastSeen.timestamp | limit 2000
+  pq: serverHost='{{src_oplockdown|oplockdown}}' | filter (owner contains:anycase('{{entity}}')) | filter owner == '-' OR !owner OR owner == '' | columns timestamp, endpoint.name, app_name, tag, severity, LastSeen.timestamp=lastseen | sort -LastSeen.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-3-edr-staging-tooling-large-archive-creation-50mb
   title: Large Archive Creation >50MB
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '3. EDR Staging & Tooling'.
-  pq: '| filter event.type == ''File Creation'' AND tgt.file.extension in:anycase(''zip'',''rar'',''7z'',''tar'',''gz'',''tgz'',''pst'',''mbox'') | let Size=(tgt.file.size || file.size || 0) | filter Size > 50000000 | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, SizeMB=(Size/1024/1024), Proc=(src.process.name || src.process.image.path), Cmd=src.process.cmdline | sort -timestamp | limit 2000'
+  pq: '| filter ((agent.uuid == ''{{agent_uuid}}'' OR endpoint.name contains:anycase(''{{hostname}}'') OR src.process.user contains:anycase(''{{username}}''))) | filter event.type == ''File Creation'' AND tgt.file.extension in:anycase(''zip'',''rar'',''7z'',''tar'',''gz'',''tgz'',''pst'',''mbox'') | let Size=(tgt.file.size || file.size || 0) | filter Size > 50000000 | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, SizeMB=(Size/1024/1024), Proc=(src.process.name || src.process.image.path), Cmd=src.process.cmdline | sort -timestamp | limit 2000'
   merge:
     kind: append
+  scope: subject
 - id: dash-11-raw-quick-pivots-raw-edr-user-endpoint-timeline
   title: Raw EDR User / Endpoint Timeline
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '11. Raw Quick Pivots'.
-  pq: event.category in ('file','process','dns','ip') | columns timestamp=(event.time || timestamp), event.category, event.type, endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc=(src.process.name || process.name), Cmd=(src.process.cmdline || process.cmdline), File=tgt.file.path, DNS=event.dns.request, DstIP=dst.ip.address, Storyline=src.process.storyline.id | sort -timestamp | limit 5000
+  pq: event.category in ('file','process','dns','ip') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | columns timestamp=(event.time || timestamp), event.category, event.type, endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc=(src.process.name || process.name), Cmd=(src.process.cmdline || process.cmdline), File=tgt.file.path, DNS=event.dns.request, DstIP=dst.ip.address, Storyline=src.process.storyline.id | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject

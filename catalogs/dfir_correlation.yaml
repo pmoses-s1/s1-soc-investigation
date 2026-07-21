@@ -3,121 +3,160 @@ queries:
 - id: qp-01
   title: User -> Source Coverage
   notes: 'Start every investigation; tells you where the user appears. | Source: All'
-  pq: |-
-    (actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or USER_ID_DERIVED contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or detail.payload.Username contains:anycase("{{entity}}") or detail.payload.UserId contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or owner contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+  pq: '(actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or USER_ID_DERIVED contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or detail.payload.Username contains:anycase("{{entity}}") or detail.payload.UserId contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or owner contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+
     | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: qp-02
   title: User -> Timeline
   notes: 'Build source-agnostic user activity timeline. | Source: All'
-  pq: |-
-    (actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or detail.payload.Username contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or owner contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+  pq: '(actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or detail.payload.Username contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or owner contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+
     | columns timestamp, serverHost, actor.email, actor.alternateId, user, user.email, username, owner, detail.payload.Username, USER_ID, ipAddress, event.name, event.type
+
     | sort timestamp
-    | limit 10000
+
+    | limit 10000'
+  scope: subject
 - id: qp-03
   title: IP -> Everything
   notes: 'Pivot a suspicious IP from Okta/Salesforce/ZIA/etc. | Source: All'
-  pq: |-
-    ip='{{ip}}' OR ipAddress='{{ip}}' OR client.ipAddress='{{ip}}' OR detail.payload.SourceIp='{{ip}}' OR CLIENT_IP='{{ip}}' OR event.src_ip='{{ip}}' OR event.dest_ip='{{ip}}'
+  pq: 'ip=''{{ip}}'' OR ipAddress=''{{ip}}'' OR client.ipAddress=''{{ip}}'' OR detail.payload.SourceIp=''{{ip}}'' OR CLIENT_IP=''{{ip}}'' OR event.src_ip=''{{ip}}'' OR event.dest_ip=''{{ip}}''
+
     | columns timestamp, serverHost, actor.email, user, username, detail.payload.Username, ipAddress, client.ipAddress, detail.payload.SourceIp, CLIENT_IP, event.name, event.type
+
     | sort -timestamp
-    | limit 10000
+
+    | limit 10000'
+  scope: subject
 - id: qp-04
   title: Session -> Timeline
   notes: 'Reconstruct a web/app session using known session keys. | Source: Okta, Salesforce, Slack, Box'
-  pq: |-
-    session='{{session}}' OR authenticationContext.externalSessionId='{{session}}' OR detail.payload.SessionKey='{{session}}' OR SESSION_KEY='{{session}}' OR detail.payload.LoginKey='{{login_key}}' OR LOGIN_KEY='{{login_key}}'
+  pq: 'session=''{{session}}'' OR authenticationContext.externalSessionId=''{{session}}'' OR detail.payload.SessionKey=''{{session}}'' OR SESSION_KEY=''{{session}}'' OR detail.payload.LoginKey=''{{login_key}}'' OR LOGIN_KEY=''{{login_key}}''
+
     | columns timestamp, serverHost, actor.email, detail.payload.Username, event.name, event.type, action, detail-type, ipAddress, detail.payload.SourceIp, CLIENT_IP
+
     | sort timestamp
-    | limit 10000
+
+    | limit 10000'
+  scope: pivot
 - id: qp-05
   title: Domain / URL -> Egress
   notes: 'Review web activity to personal cloud/AI/paste sites. | Source: ZIA'
-  pq: |-
-    serverHost='{{src_zia|zia}}'
-    | filter event.hostname contains:anycase('{{domain}}') OR event.url contains:anycase('{{domain}}')
+  pq: 'serverHost=''{{src_zia|zia}}''
+
+    | filter event.hostname contains:anycase(''{{domain}}'') OR event.url contains:anycase(''{{domain}}'')
+
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
+
     | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,event.requestmethod,outB,event.ClientIP,event.useragent
+
     | sort -timestamp
-    | limit 5000
+
+    | limit 5000'
+  scope: pivot
 - id: qp-06
   title: File Name -> Activity
   notes: 'Find downloads/uploads/shares for a filename/title. | Source: Google WS, Slack, Box, EDR'
-  pq: |-
-    message contains:anycase('{{file_or_title}}') OR event.doc_title contains:anycase('{{file_or_title}}') OR entity.file.name contains:anycase('{{file_or_title}}') OR tgt.file.path contains:anycase('{{file_or_title}}')
+  pq: 'message contains:anycase(''{{file_or_title}}'') OR event.doc_title contains:anycase(''{{file_or_title}}'') OR entity.file.name contains:anycase(''{{file_or_title}}'') OR tgt.file.path contains:anycase(''{{file_or_title}}'')
+
     | columns timestamp, serverHost, actor.email, user, event.name, action, event.doc_title, entity.file.name, tgt.file.path, ipAddress
+
     | sort -timestamp
-    | limit 5000
+
+    | limit 5000'
+  scope: pivot
 - id: qp-07
   title: Salesforce UserId -> Activity
   notes: 'Salesforce often needs UserId instead of email. | Source: salesforce_event'
-  pq: |-
-    serverHost='{{src_salesforce_event|salesforce_event}}'
-    | filter USER_ID='{{sf_user_id}}' OR USER_ID_DERIVED='{{sf_user_id}}' OR username contains:anycase('{{username}}')
+  pq: 'serverHost=''{{src_salesforce_event|salesforce_event}}''
+
+    | filter USER_ID=''{{sf_user_id}}'' OR USER_ID_DERIVED=''{{sf_user_id}}'' OR username contains:anycase(''{{username}}'')
+
     | let ts=(TIMESTAMP_DERIVED || TIMESTAMP || timestamp || sca:ingestTime)
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=EVENT_TYPE, UserId=USER_ID, DerivedUser=USER_ID_DERIVED, ClientIP=CLIENT_IP, ClientName=CLIENT_NAME, ConnectedApp=CONNECTED_APP_ID, Method=HTTP_METHOD, Entity=ENTITY_NAME, URI=URI, Query=QUERY, Status=REQUEST_STATUS, LoginKey=LOGIN_KEY, SessionKey=SESSION_KEY, UserAgent=USER_AGENT
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), EventType=EVENT_TYPE, UserId=USER_ID, DerivedUser=USER_ID_DERIVED, ClientIP=CLIENT_IP, ClientName=CLIENT_NAME, ConnectedApp=CONNECTED_APP_ID, Method=HTTP_METHOD, Entity=ENTITY_NAME, URI=URI, Query=QUERY, Status=REQUEST_STATUS, LoginKey=LOGIN_KEY, SessionKey=SESSION_KEY, UserAgent=USER_AGENT
+
     | sort -Time
-    | limit 5000
+
+    | limit 5000'
+  scope: subject
 - id: qp-08
   title: Salesforce Session -> Timeline
   notes: 'Tie login to report/query/file activity. | Source: salesforce-realtime, salesforce_event'
-  pq: |-
-    serverHost in ('salesforce-realtime','salesforce_event')
-    | filter detail.payload.LoginKey='{{login_key}}' OR detail.payload.SessionKey='{{session}}' OR LOGIN_KEY='{{login_key}}' OR SESSION_KEY='{{session}}'
+  pq: 'serverHost in (''salesforce-realtime'',''salesforce_event'')
+
+    | filter detail.payload.LoginKey=''{{login_key}}'' OR detail.payload.SessionKey=''{{session}}'' OR LOGIN_KEY=''{{login_key}}'' OR SESSION_KEY=''{{session}}''
+
     | let ts=(detail.payload.EventDate || TIMESTAMP_DERIVED || time || timestamp || sca:ingestTime)
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, DetailType=detail-type, EventType=EVENT_TYPE, Username=detail.payload.Username, UserId=detail.payload.UserId, Operation=detail.payload.Operation, EventName=detail.payload.Name, Entity=ENTITY_NAME, URI=URI, IP=detail.payload.SourceIp, ClientIP=CLIENT_IP, Query=detail.payload.Query
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Source=serverHost, DetailType=detail-type, EventType=EVENT_TYPE, Username=detail.payload.Username, UserId=detail.payload.UserId, Operation=detail.payload.Operation, EventName=detail.payload.Name, Entity=ENTITY_NAME, URI=URI, IP=detail.payload.SourceIp, ClientIP=CLIENT_IP, Query=detail.payload.Query
+
     | sort Time
-    | limit 10000
+
+    | limit 10000'
+  scope: pivot
 - id: qp-09
   title: Google Confidential External Sharing
   notes: 'Review confidential Google Drive docs shared externally. | Source: google_workspace'
-  pq: |-
-    serverHost == 'google_workspace'
-    | filter id.applicationName == 'drive'
-    | filter classificationLabel in:anycase ('Highly Confidential','Confidential')
-    | filter event.visibility in:anycase ('shared_externally','anyone_with_link','people_with_link','public_on_the_web','people_within_domain') OR event.old_visibility in:anycase ('shared_externally','anyone_with_link','people_with_link','public_on_the_web')
+  pq: 'serverHost == ''google_workspace'' | filter ((actor.email contains:anycase(''{{entity}}'') OR event.owner contains:anycase(''{{entity}}''))) | filter id.applicationName == ''drive''
+
+    | filter classificationLabel in:anycase (''Highly Confidential'',''Confidential'')
+
+    | filter event.visibility in:anycase (''shared_externally'',''anyone_with_link'',''people_with_link'',''public_on_the_web'',''people_within_domain'') OR event.old_visibility in:anycase (''shared_externally'',''anyone_with_link'',''people_with_link'',''public_on_the_web'')
+
     | columns timestamp, actor.email, event.owner, event.doc_title, event.doc_type, classificationLabel, event.name, event.visibility, event.old_visibility, ipAddress, networkInfo.regionCode, networkInfo.ipAsn, event.doc_id
+
     | sort -timestamp
-    | limit 1000
+
+    | limit 1000'
+  scope: subject
 - id: qp-10
   title: Slack File Activity
   notes: 'Downloads/uploads/shares by a user. | Source: slack'
-  pq: |-
-    serverHost='{{src_slack|slack}}' actor.user.email contains:anycase '{{entity}}'
-      action in ('file_downloaded','file_uploaded','file_shared','file_public_link_created')
-    | columns timestamp, action, actor.user.email, entity.file.name, entity.file.filetype, entity.channel.name, context.ip_address, context.ua
-    | sort -timestamp
-    | limit 1000
+  pq: "serverHost='{{src_slack|slack}}' actor.user.email contains:anycase '{{entity}}'\n  action in ('file_downloaded','file_uploaded','file_shared','file_public_link_created')\n| columns timestamp, action, actor.user.email, entity.file.name, entity.file.filetype, entity.channel.name, context.ip_address, context.ua\n| sort -timestamp\n| limit 1000"
+  scope: subject
 - id: qp-11
   title: ZIA Large Uploads
   notes: 'Find large outbound web uploads. | Source: zia'
-  pq: |-
-    serverHost='{{src_zia|zia}}'
-    | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
+  pq: 'serverHost=''{{src_zia|zia}}'' | filter ((event.user contains:anycase(''{{entity}}'') OR event.deviceowner contains:anycase(''{{entity}}''))) | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
+
     | filter outB > 50000000
+
     | columns timestamp,event.user,event.devicehostname,event.hostname,event.url,event.appname,event.action,event.requestmethod,outB,event.ClientIP,event.useragent
+
     | sort -outB
-    | limit 1000
+
+    | limit 1000'
+  scope: subject
 - id: qp-12
   title: AI / Unsanctioned App Usage
   notes: 'Find high-volume AI app usage or upload volume. | Source: zia, prompt-security, anthropic-activity'
-  pq: |-
-    serverHost='{{src_zia|zia}}'
-    | filter event.urlcategory contains:anycase('AI','ML') OR event.appname contains:anycase('AI','Claude','ChatGPT','Gemini','Perplexity','Copilot')
+  pq: 'serverHost=''{{src_zia|zia}}'' | filter ((event.user contains:anycase(''{{entity}}'') OR event.deviceowner contains:anycase(''{{entity}}''))) | filter event.urlcategory contains:anycase(''AI'',''ML'') OR event.appname contains:anycase(''AI'',''Claude'',''ChatGPT'',''Gemini'',''Perplexity'',''Copilot'')
+
     | let outB=(event.outbytes || ZENTotalBytesTxClient || 0)
+
     | group upload_bytes=sum(outB), events=count() by event.user,event.hostname,event.appname,event.action
-    | sort -upload_bytes
+
+    | sort -upload_bytes'
+  scope: subject
 - id: qp-13
   title: Query Cost Telemetry
   notes: 'Review query cost and columns faulted for heavy searches. | Source: scalyr-metalog'
-  pq: |-
-    serverHost='{{src_scalyr_metalog|scalyr-metalog}}' tag = 'QueryExecutive.query' user='{{entity}}'
+  pq: 'serverHost=''{{src_scalyr_metalog|scalyr-metalog}}'' tag = ''QueryExecutive.query'' user=''{{entity}}''
+
     | group tbCovered=sum(coverBytes)/1000/1000/1000/1000, tbScanned=sum(columnFaultBytes)/1000/1000/1000/1000, cpuSeconds=sum(queryComputationCpuNs)/1000/1000/1000, tbMemoryUsed=sum(heapAllocatedBytes)/1000/1000/1000/1000, columnsQueriedPerEpoch=sum(columnsFaulted)/sum(epochsQueried) by lrqToken
+
     | let coverBytesPerScanBytes=tbCovered/tbScanned
+
     | sort -tbScanned
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: query-cost-telemetry
   title: Query Cost Telemetry
   notes: 'Source: scalyr-metalog | Imported/generated for SOC investigation library.'
@@ -132,9 +171,11 @@ queries:
     - cpuSeconds
     - tbMemoryUsed
     - columnsQueriedPerEpoch
+  scope: subject
 - id: imported-searches-query-telemetry-search-09
   title: Query Telemetry search 09
   notes: 'Source: scalyr-metalog | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_scalyr_metalog|scalyr-metalog}}' user='{{entity}}' action='launchQuery' | columns timestamp, Search=queryGroupRequest.queries, PreFilter=queryGroupRequest.preFilter | sort -timestamp | nolimit0
   merge:
     kind: append
+  scope: subject

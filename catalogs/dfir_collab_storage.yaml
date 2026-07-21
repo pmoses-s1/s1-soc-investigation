@@ -3,267 +3,370 @@ queries:
 - id: gws-01
   title: GWS All Drive Activity — Overview
   notes: 'What Google Drive event types did this user generate? Baseline before drilling down. | Source: google_workspace | Pivot if positive: download, copy, print, trash spikes → drill into specific queries below'
-  pq: |-
-    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
-    | group Events=count() by EventName=event.name, Day.timestamp=timebucket(timestamp,'1d')
+  pq: 'serverHost=''{{src_google_workspace|google_workspace}}'' actor.email=''{{entity}}'' id.applicationName=''drive''
+
+    | group Events=count() by EventName=event.name, Day.timestamp=timebucket(timestamp,''1d'')
+
     | sort -Day.timestamp
-    | transpose EventName on Day.timestamp
+
+    | transpose EventName on Day.timestamp'
+  scope: subject
 - id: gws-02
   title: GWS Downloads
   notes: 'What files did the user explicitly download from Google Drive?
 
 
     NOTE: event.originating_app_id != ''124622177520'' excludes automated Glean/SCIO indexing. This is required — without this exclusion, results include thousands of automated ''downloads'' that are not user actions. | Source: google_workspace | Pivot if positive: Sensitive files → GWS-05 for classification. Endpoint Downloads folder EDR-07 for same filenames'
-  pq: |-
-    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' event.name='download' id.applicationName='drive'
-    | filter event.originating_app_id != '124622177520'
+  pq: 'serverHost=''{{src_google_workspace|google_workspace}}'' actor.email=''{{entity}}'' event.name=''download'' id.applicationName=''drive''
+
+    | filter event.originating_app_id != ''124622177520''
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 5000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, DocType=event.doc_type, Classification=classificationLabel, IP=ipAddress, App=event.app_name
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), DocTitle=event.doc_title, DocID=event.doc_id, DocType=event.doc_type, Classification=classificationLabel, IP=ipAddress, App=event.app_name'
+  scope: subject
 - id: gws-03
   title: GWS External Sharing
   notes: 'Were any files shared externally (public link, anyone with link, shared_externally)? | Source: google_workspace | Pivot if positive: Externally shared + Confidential/HC classification = escalate. Was file also downloaded?'
-  pq: |-
-    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
-    | filter event.visibility in:anycase ('public_on_the_web','people_with_link','shared_externally') OR event.old_visibility in:anycase ('public_on_the_web','people_with_link','shared_externally')
+  pq: 'serverHost=''{{src_google_workspace|google_workspace}}'' actor.email=''{{entity}}'' id.applicationName=''drive''
+
+    | filter event.visibility in:anycase (''public_on_the_web'',''people_with_link'',''shared_externally'') OR event.old_visibility in:anycase (''public_on_the_web'',''people_with_link'',''shared_externally'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, NewVisibility=event.visibility, OldVisibility=event.old_visibility, Classification=classificationLabel, Owner=event.owner, IP=ipAddress
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), DocTitle=event.doc_title, DocID=event.doc_id, NewVisibility=event.visibility, OldVisibility=event.old_visibility, Classification=classificationLabel, Owner=event.owner, IP=ipAddress'
+  scope: subject
 - id: gws-04
   title: GWS Deleted / Trashed Files
   notes: 'Did the user delete or trash files — especially after downloading them? Anti-forensics signal. | Source: google_workspace | Pivot if positive: Compare deletion timestamps to GWS-02 download timestamps for same doc IDs'
-  pq: |-
-    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
-    | filter event.name in:anycase ('trash','delete')
-    | filter !(event.deletion_reason == 'trash_auto_delete')
+  pq: 'serverHost=''{{src_google_workspace|google_workspace}}'' actor.email=''{{entity}}'' id.applicationName=''drive''
+
+    | filter event.name in:anycase (''trash'',''delete'')
+
+    | filter !(event.deletion_reason == ''trash_auto_delete'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Reason=event.deletion_reason, IP=ipAddress
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Reason=event.deletion_reason, IP=ipAddress'
+  scope: subject
 - id: gws-05
   title: GWS Sensitive File Access — Confidential + HC
   notes: 'Which Confidential or Highly Confidential files did this user access, sync, or download? | Source: google_workspace | Pivot if positive: Repeated sync of same HC doc → EDR temp file artifacts for confirmation'
-  pq: |-
-    serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive'
-    | filter classificationLabel in:anycase ('Highly Confidential','Confidential')
-    | filter event.name in:anycase ('sync_item_content','download','access_item_content','view','copy','print')
+  pq: 'serverHost=''{{src_google_workspace|google_workspace}}'' actor.email=''{{entity}}'' id.applicationName=''drive''
+
+    | filter classificationLabel in:anycase (''Highly Confidential'',''Confidential'')
+
+    | filter event.name in:anycase (''sync_item_content'',''download'',''access_item_content'',''view'',''copy'',''print'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 5000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Event=event.name, DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Owner=event.owner, IP=ipAddress, App=event.app_name
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Event=event.name, DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Owner=event.owner, IP=ipAddress, App=event.app_name'
+  scope: subject
 - id: gws-06
   title: GWS Activity Daily Summary
   notes: 'How many events and unique documents per day? Identify spike days for deeper review. | Source: monitor | Pivot if positive: Peak days → run GWS-02 and GWS-05 scoped to those dates'
-  pq: |-
-    serverHost='{{src_monitor|monitor}}' pqEvent='google_workspace_user_summary'
-    | filter actor.email == '{{entity}}'
+  pq: 'serverHost=''{{src_monitor|monitor}}'' pqEvent=''google_workspace_user_summary''
+
+    | filter actor.email == ''{{entity}}''
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 1000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Email=actor.email, TotalDownloads, UniqueFileCount, GB
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Email=actor.email, TotalDownloads, UniqueFileCount, GB'
+  scope: subject
 - id: slk-01
   title: Slack File Downloads — All Devices
   notes: 'What files did the user download from Slack? Includes device type parsed from user agent.
 
 
     NOTE: Glean/SCIO crawler is excluded — it would generate thousands of false file_downloaded events. Always include these exclusions. | Source: slack | Pivot if positive: iPhone/Android downloads → outside ZIA inspection. Filenames → correlate with GWS downloads'
-  pq: |-
-    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='file_downloaded'
-    | filter !(context.app.name contains:anycase 'Glean')
-    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
-    | filter !(context.ua contains:anycase 'Scio Search')
+  pq: 'serverHost=''{{src_slack|slack}}'' actor.user.email=''{{entity}}'' action=''file_downloaded''
+
+    | filter !(context.app.name contains:anycase ''Glean'')
+
+    | filter !(context.ua contains:anycase ''GleanSearchCrawlerBot'')
+
+    | filter !(context.ua contains:anycase ''Scio Search'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
-    | let DeviceType=context.ua contains:anycase 'iphone' ? 'iPhone (personal)' : context.ua contains:anycase 'android' ? 'Android (personal)' : context.ua contains:anycase 'AppleSilicon Sonic Slack' ? 'macOS Desktop App' : context.ua contains:anycase 'Sonic Slack' ? 'Windows Desktop App' : context.ua contains:anycase("Windows NT") ? 'Windows Browser' : context.ua contains:anycase("Macintosh") ? 'macOS Browser' : context.ua
+
+    | let DeviceType=context.ua contains:anycase ''iphone'' ? ''iPhone (personal)'' : context.ua contains:anycase ''android'' ? ''Android (personal)'' : context.ua contains:anycase ''AppleSilicon Sonic Slack'' ? ''macOS Desktop App'' : context.ua contains:anycase ''Sonic Slack'' ? ''Windows Desktop App'' : context.ua contains:anycase("Windows NT") ? ''Windows Browser'' : context.ua contains:anycase("Macintosh") ? ''macOS Browser'' : context.ua
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Device=DeviceType, IP=context.ip_address, Location=context.location.name, URL=details.url_private
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Device=DeviceType, IP=context.ip_address, Location=context.location.name, URL=details.url_private'
+  scope: subject
 - id: slk-02
   title: Slack Non-Corporate Device Downloads
   notes: 'Files downloaded to personal devices only (excludes corporate Windows device). Replace Windows NT version with subject''s actual OS build if known. | Source: slack | Pivot if positive: iPhone downloads from off-network IP = highest priority for AXIOM. File IDs for forensic retrieval'
-  pq: |-
-    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action in ('file_downloaded','file_shared','file_uploaded','file_deleted')
-    | filter !(context.ua contains:anycase 'Windows NT 10.0.26100')
-    | filter !(context.ua contains:anycase 'OKTA')
-    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
-    | filter !(context.ua contains:anycase 'Scio Search')
+  pq: 'serverHost=''{{src_slack|slack}}'' actor.user.email=''{{entity}}'' action in (''file_downloaded'',''file_shared'',''file_uploaded'',''file_deleted'')
+
+    | filter !(context.ua contains:anycase ''Windows NT 10.0.26100'')
+
+    | filter !(context.ua contains:anycase ''OKTA'')
+
+    | filter !(context.ua contains:anycase ''GleanSearchCrawlerBot'')
+
+    | filter !(context.ua contains:anycase ''Scio Search'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Action=action, File=entity.file.name, FileID=entity.file.id, IP=context.ip_address, UA=context.ua, URL=details.url_private
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Action=action, File=entity.file.name, FileID=entity.file.id, IP=context.ip_address, UA=context.ua, URL=details.url_private'
+  scope: subject
 - id: slk-03
   title: Slack File Uploads
   notes: 'What files did the user upload to Slack? Uploading sensitive docs to Slack = potential staging for sharing. | Source: slack | Pivot if positive: Sensitive filename → channel ID → resolve channel name with Slack admin. Multiple uploads = 5+ = deliberate sharing'
-  pq: |-
-    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='file_uploaded'
-    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
+  pq: 'serverHost=''{{src_slack|slack}}'' actor.user.email=''{{entity}}'' action=''file_uploaded''
+
+    | filter !(context.ua contains:anycase ''GleanSearchCrawlerBot'')
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Channel=entity.channel.id, IP=context.ip_address, UA=context.ua
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Channel=entity.channel.id, IP=context.ip_address, UA=context.ua'
+  scope: subject
 - id: slk-04
   title: Slack Channel Joins — Burst Pattern
   notes: 'Did the user join many channels in a short period? Burst joins before departure = accessing file history. | Source: slack | Pivot if positive: Channel joined → file_downloaded from that channel in same day window?'
-  pq: |-
-    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='user_joined_channel'
+  pq: 'serverHost=''{{src_slack|slack}}'' actor.user.email=''{{entity}}'' action=''user_joined_channel''
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Channel=entity.channel.name, ChannelID=entity.channel.id, IP=context.ip_address
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Channel=entity.channel.name, ChannelID=entity.channel.id, IP=context.ip_address'
+  scope: subject
 - id: slk-05
   title: Slack Activity by Device Type
   notes: 'What device types has the user accessed Slack from? Shows corporate vs personal device breakdown. | Source: slack | Pivot if positive: Mobile device present → SLK-02 for mobile-only downloads'
-  pq: |-
-    serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}'
-    | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot')
-    | filter !(context.ua contains:anycase 'Scio Search')
-    | let DeviceType=context.ua contains:anycase 'iphone' ? 'iPhone' : context.ua contains:anycase 'android' ? 'Android' : context.ua contains:anycase 'AppleSilicon Sonic Slack' ? 'macOS Desktop App' : context.ua contains:anycase 'Sonic Slack' ? 'Windows Desktop App' : context.ua contains:anycase("Windows NT") ? 'Windows Browser' : context.ua contains:anycase("Macintosh") ? 'macOS Browser' : 'Other/API'
+  pq: 'serverHost=''{{src_slack|slack}}'' actor.user.email=''{{entity}}''
+
+    | filter !(context.ua contains:anycase ''GleanSearchCrawlerBot'')
+
+    | filter !(context.ua contains:anycase ''Scio Search'')
+
+    | let DeviceType=context.ua contains:anycase ''iphone'' ? ''iPhone'' : context.ua contains:anycase ''android'' ? ''Android'' : context.ua contains:anycase ''AppleSilicon Sonic Slack'' ? ''macOS Desktop App'' : context.ua contains:anycase ''Sonic Slack'' ? ''Windows Desktop App'' : context.ua contains:anycase("Windows NT") ? ''Windows Browser'' : context.ua contains:anycase("Macintosh") ? ''macOS Browser'' : ''Other/API''
+
     | group Events=count(), Actions=array_agg_distinct(action, 10) by DeviceType
-    | sort -Events
+
+    | sort -Events'
+  scope: subject
 - id: atl-01
   title: Atlassian/Jira/Confluence Coverage
   notes: 'What Atlassian/Jira/Confluence activity exists for this user? | Source: atlassian-cloud-enterprise/jira/confluence-cloud | Pivot if positive: ATL-02/ATL-03 and Okta app SSO'
-  pq: |-
-    serverHost in ('atlassian-cloud-enterprise','jira','confluence-cloud')
-    | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}') OR user contains:anycase('{{username}}')
+  pq: 'serverHost in (''atlassian-cloud-enterprise'',''jira'',''confluence-cloud'')
+
+    | filter actor.email contains:anycase(''{{entity}}'') OR actor.name contains:anycase(''{{username}}'') OR user contains:anycase(''{{username}}'')
+
     | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp), Actions=array_agg_distinct(action, 20) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: atl-02
   title: Confluence Space Exports / Jira Bulk
   notes: 'Any export-like actions in Confluence/Jira? | Source: confluence-cloud/jira/atlassian-cloud-enterprise | Pivot if positive: Endpoint archive/staging, ZIA upload, Google Drive/Box follow-on'
-  pq: |-
-    serverHost in ('confluence-cloud','jira','atlassian-cloud-enterprise')
-    | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}')
-    | filter action contains:anycase('export') OR action contains:anycase('download') OR action contains:anycase('attachment') OR event.name contains:anycase('export')
+  pq: 'serverHost in (''confluence-cloud'',''jira'',''atlassian-cloud-enterprise'')
+
+    | filter actor.email contains:anycase(''{{entity}}'') OR actor.name contains:anycase(''{{username}}'')
+
+    | filter action contains:anycase(''export'') OR action contains:anycase(''download'') OR action contains:anycase(''attachment'') OR event.name contains:anycase(''export'')
+
     | sort -timestamp
+
     | limit 2000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, Action=action, Object=object, IP=location.ip, Method=method
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Source=serverHost, Actor=actor.email, Action=action, Object=object, IP=location.ip, Method=method'
+  scope: subject
 - id: atl-03
   title: Atlassian API Token / Admin Changes
   notes: 'Was access, token, or admin configuration changed? | Source: atlassian-cloud-enterprise | Pivot if positive: Okta admin events, PagerDuty/Snyk admin changes'
-  pq: |-
-    serverHost='{{src_atlassian_cloud_enterprise|atlassian-cloud-enterprise}}'
-    | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{username}}')
-    | filter action contains:anycase('token') OR action contains:anycase('admin') OR action contains:anycase('group') OR action contains:anycase('permission')
+  pq: 'serverHost=''{{src_atlassian_cloud_enterprise|atlassian-cloud-enterprise}}''
+
+    | filter actor.email contains:anycase(''{{entity}}'') OR actor.name contains:anycase(''{{username}}'')
+
+    | filter action contains:anycase(''token'') OR action contains:anycase(''admin'') OR action contains:anycase(''group'') OR action contains:anycase(''permission'')
+
     | sort -timestamp
+
     | limit 1000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Action=action, IP=location.ip, Token=actor.tokenLabel, Changes=changedValues, Context=context
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Actor=actor.email, Action=action, IP=location.ip, Token=actor.tokenLabel, Changes=changedValues, Context=context'
+  scope: subject
 - id: sto-01
   title: Google Drive Downloads / External Sharing
   notes: 'Drive downloads, visibility changes, or external sharing by user. | Source: google_workspace/google_workspace_prompt_drive | Pivot if positive: ZIA upload/exfil, Endpoint file activity'
-  pq: |-
-    serverHost in ('google_workspace','google_workspace_prompt_drive')
-    | filter actor.email contains:anycase('{{entity}}')
-    | filter id.applicationName='drive' OR event.name contains:anycase('download') OR event.name contains:anycase('visibility') OR event.visibility contains:anycase('external')
+  pq: 'serverHost in (''google_workspace'',''google_workspace_prompt_drive'')
+
+    | filter actor.email contains:anycase(''{{entity}}'')
+
+    | filter id.applicationName=''drive'' OR event.name contains:anycase(''download'') OR event.name contains:anycase(''visibility'') OR event.visibility contains:anycase(''external'')
+
     | sort -timestamp
+
     | limit 3000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, App=id.applicationName, Event=event.name, Title=event.doc_title, Owner=event.owner, Visibility=event.visibility, IP=ipAddress, Label=classificationLabel
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Actor=actor.email, App=id.applicationName, Event=event.name, Title=event.doc_title, Owner=event.owner, Visibility=event.visibility, IP=ipAddress, Label=classificationLabel'
+  scope: subject
 - id: sto-02
   title: Box Downloads / Sharing
   notes: 'Box downloads, shared links, collaboration invites. | Source: box | Pivot if positive: Exclude service_name=Box Drive/Sync then corroborate with endpoint/ZIA'
-  pq: |-
-    serverHost='{{src_box|box}}'
-    | filter created_by.login contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}')
-    | filter event_type contains:anycase('download') OR event_type contains:anycase('share') OR event_type contains:anycase('collaboration') OR event_type contains:anycase('link')
+  pq: 'serverHost=''{{src_box|box}}''
+
+    | filter created_by.login contains:anycase(''{{entity}}'') OR actor.email contains:anycase(''{{entity}}'')
+
+    | filter event_type contains:anycase(''download'') OR event_type contains:anycase(''share'') OR event_type contains:anycase(''collaboration'') OR event_type contains:anycase(''link'')
+
     | sort -timestamp
+
     | limit 3000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=created_by.login, Event=event_type, Item=source.name, Size=additional_details.size, IP=ip_address, Service=additional_details.service_name
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Actor=created_by.login, Event=event_type, Item=source.name, Size=additional_details.size, IP=ip_address, Service=additional_details.service_name'
+  scope: subject
 - id: sto-03
   title: OneDrive / SharePoint Activity
   notes: 'Any M365 storage activity for this user? | Source: onedrive | Pivot if positive: Storage and ZIA/Endpoint corroboration'
-  pq: |-
-    serverHost='{{src_onedrive|onedrive}}'
-    | filter actor.email contains:anycase('{{entity}}') OR user contains:anycase('{{entity}}')
-    | filter event.name contains:anycase('download') OR event.name contains:anycase('share') OR event.name contains:anycase('sync') OR event.name contains:anycase('access')
+  pq: 'serverHost=''{{src_onedrive|onedrive}}''
+
+    | filter actor.email contains:anycase(''{{entity}}'') OR user contains:anycase(''{{entity}}'')
+
+    | filter event.name contains:anycase(''download'') OR event.name contains:anycase(''share'') OR event.name contains:anycase(''sync'') OR event.name contains:anycase(''access'')
+
     | sort -timestamp
+
     | limit 3000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Event=event.name, Object=event.doc_title, IP=ipAddress, Label=classificationLabel
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Actor=actor.email, Event=event.name, Object=event.doc_title, IP=ipAddress, Label=classificationLabel'
+  scope: subject
 - id: azr-02-2
   title: Azure OneDrive — Sharing and Downloads
   notes: 'Source: onedrive | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_onedrive|onedrive}}' userPrincipalName='{{entity}}' | filter operation matches:anycase ('SharingSet|SharingInvitationCreated|AnonymousLinkCreated|FileDownloaded|FileSyncDownloaded|FileDeleted') | let ts=(timestamp || createdDateTime || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Operation=operation, File=auditData.SourceFileName, Ext=auditData.SourceFileExtension, Site=auditData.SiteUrl, IP=auditData.ClientIP, Managed=auditData.IsManagedDevice, App=auditData.ApplicationDisplayName
   merge:
     kind: append
+  scope: subject
 - id: gws-06-2
   title: GWS Activity Daily Summary
   notes: 'Source: monitor | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_monitor|monitor}}' pqEvent='google_workspace_user_summary' | filter actor.email == '{{entity}}' | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Email=actor.email, TotalDownloads, UniqueFileCount, GB
   merge:
     kind: append
+  scope: subject
 - id: gws-04-2
   title: GWS Deleted / Trashed Files
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive' | filter event.name in:anycase ('trash','delete') | filter !(event.deletion_reason == 'trash_auto_delete') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Reason=event.deletion_reason, IP=ipAddress
   merge:
     kind: append
+  scope: subject
 - id: gws-02-2
   title: GWS Downloads
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' event.name='download' id.applicationName='drive' | filter event.originating_app_id != '124622177520' | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, DocType=event.doc_type, Classification=classificationLabel, IP=ipAddress, App=event.app_name
   merge:
     kind: append
+  scope: subject
 - id: gws-03-2
   title: GWS External Sharing
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive' | filter event.visibility in:anycase ('public_on_the_web','people_with_link','shared_externally') OR event.old_visibility in:anycase ('public_on_the_web','people_with_link','shared_externally') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), DocTitle=event.doc_title, DocID=event.doc_id, NewVisibility=event.visibility, OldVisibility=event.old_visibility, Classification=classificationLabel, Owner=event.owner, IP=ipAddress
   merge:
     kind: append
+  scope: subject
 - id: gws-05-2
   title: GWS Sensitive File Access — Confidential + HC
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' id.applicationName='drive' | filter classificationLabel in:anycase ('Highly Confidential','Confidential') | filter event.name in:anycase ('sync_item_content','download','access_item_content','view','copy','print') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Event=event.name, DocTitle=event.doc_title, DocID=event.doc_id, Classification=classificationLabel, Owner=event.owner, IP=ipAddress, App=event.app_name
   merge:
     kind: append
+  scope: subject
 - id: sto-01-2
   title: Google Drive Downloads / External Sharing
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost in ('google_workspace','google_workspace_prompt_drive') | filter actor.email contains:anycase('{{entity}}') | filter id.applicationName='drive' OR event.name contains:anycase('download') OR event.name contains:anycase('visibility') OR event.visibility contains:anycase('external') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, App=id.applicationName, Event=event.name, Title=event.doc_title, Owner=event.owner, Visibility=event.visibility, IP=ipAddress, Label=classificationLabel
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-23
   title: Google Workspace search 23
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email contains:anycase '{{entity}}' event.name in ('User Sharing Permissions Change','Change access scope','Change document visibility') | columns timestamp, actor.email, event.name, event.doc_title, event.old_visibility, event.visibility, ipAddress | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-32
   title: Google Workspace search 32
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email contains:anycase '{{entity}}' event.name in:anycase ('download','export','print') event.doc_title contains:anycase ('AMER','Federal','Forecast','Pipeline','Regional Maps','QBR','Tracker') | columns timestamp, event.name, event.doc_title, event.doc_type, event.visibility, classificationLabel, ipAddress, actor.applicationInfo.applicationName | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-33
   title: Google Workspace search 33
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email contains:anycase '{{entity}}' event.name in:anycase ('download','export','print') | columns timestamp, actor.email, event.name, event.doc_title, event.doc_type, classificationLabel, event.visibility, ipAddress, actor.applicationInfo.applicationName | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-35
   title: Google Workspace search 35
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: '"serverHost=''{{src_google_workspace|google_workspace}}'' actor.email contains:anycase ''{{entity}}'' event.name in:anycase (''download'',''export'',''print'') event.doc_title contains:anycase (''AMER'',''Federal'',''Forecast'',''Pipeline'',''Regional Maps'',''QBR'',''Tracker'') | columns timestamp, event.name, event.doc_title, event.doc_type, event.visibility, classificationLabel, ipAddress, actor.applicationInfo.applicationName | sort -timestamp | nolimit"|nolimit'
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-36
   title: Google Workspace search 36
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: '"serverHost=''{{src_google_workspace|google_workspace}}'' actor.email contains:anycase ''{{entity}}'' event.name in (''User Sharing Permissions Change'',''Change access scope'',''Change document visibility'') | columns timestamp, actor.email, event.name, event.doc_title, event.old_visibility, event.visibility, ipAddress | sort -timestamp | nolimit"|nolimit'
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-37
   title: Google Workspace search 37
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: '"serverHost=''{{src_google_workspace|google_workspace}}'' actor.email contains:anycase ''{{entity}}'' event.name in:anycase (''download'',''export'',''print'') | columns timestamp, actor.email, event.name, event.doc_title, event.doc_type, classificationLabel, event.visibility, ipAddress, actor.applicationInfo.applicationName | sort -timestamp | nolimit"|nolimit'
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-55
   title: Google Workspace search 55
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email contains:anycase '{{entity}}' event.name='change_user_access' event.visibility=* | filter event.visibility != event.old_visibility | filter event.visibility in ('shared_externally','public_in_the_domain','people_with_link') | columns timestamp, actor.email, event.doc_title, event.doc_id, classificationLabel, OldVisibility=event.old_visibility, NewVisibility=event.visibility, ipAddress | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-google-workspace-search-56
   title: Google Workspace search 56
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
@@ -278,6 +381,7 @@ queries:
     array_cols:
     - DocTitles
     - Classifications
+  scope: subject
 - id: imported-searches-google-workspace-search-57
   title: Google Workspace search 57
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
@@ -294,6 +398,7 @@ queries:
     - DocTitles
     - Classifications
     - IPs
+  scope: subject
 - id: imported-searches-google-workspace-search-58
   title: Google Workspace search 58
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
@@ -310,6 +415,7 @@ queries:
     - DocTitles
     - Classifications
     - IPs
+  scope: subject
 - id: imported-searches-google-workspace-search-59
   title: Google Workspace search 59
   notes: 'Source: google_workspace | Imported/generated for SOC investigation library.'
@@ -324,12 +430,14 @@ queries:
     array_cols:
     - DocTitles
     - Classifications
+  scope: subject
 - id: sto-03-2
   title: OneDrive / SharePoint Activity
   notes: 'Source: onedrive | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_onedrive|onedrive}}' | filter actor.email contains:anycase('{{entity}}') OR user contains:anycase('{{entity}}') | filter event.name contains:anycase('download') OR event.name contains:anycase('share') OR event.name contains:anycase('sync') OR event.name contains:anycase('access') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Event=event.name, Object=event.doc_title, IP=ipAddress, Label=classificationLabel
   merge:
     kind: append
+  scope: subject
 - id: slk-05-2
   title: Slack Activity by Device Type
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
@@ -342,64 +450,74 @@ queries:
     - Events
     array_cols:
     - Actions
+  scope: subject
 - id: slk-04-2
   title: Slack Channel Joins — Burst Pattern
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='user_joined_channel' | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Channel=entity.channel.name, ChannelID=entity.channel.id, IP=context.ip_address
   merge:
     kind: append
+  scope: subject
 - id: slack-file-activity
   title: Slack File Activity
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_slack|slack}}' actor.user.email contains:anycase '{{entity}}' action in ('file_downloaded','file_uploaded','file_shared','file_public_link_created') | columns timestamp, action, actor.user.email, entity.file.name, entity.file.filetype, entity.channel.name, context.ip_address, context.ua | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: slk-01-2
   title: Slack File Downloads — All Devices
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
   pq: 'serverHost=''{{src_slack|slack}}'' actor.user.email=''{{entity}}'' action=''file_downloaded'' | filter !(context.app.name contains:anycase ''Glean'') | filter !(context.ua contains:anycase ''GleanSearchCrawlerBot'') | filter !(context.ua contains:anycase ''Scio Search'') | let ts=(timestamp || event.time || sca:ingestTime) | let DeviceType=context.ua contains:anycase ''iphone'' ? ''iPhone (personal)'' : context.ua contains:anycase ''android'' ? ''Android (personal)'' : context.ua contains:anycase ''AppleSilicon Sonic Slack'' ? ''macOS Desktop App'' : context.ua contains:anycase ''Sonic Slack'' ? ''Windows Desktop App'' : context.ua contains ''Windows NT'' ? ''Windows Browser'' : context.ua contains ''Macintosh'' ? ''macOS Browser'' : context.ua | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Device=DeviceType, IP=context.ip_address, Location=context.location.name, URL=details.url_private'
   merge:
     kind: append
+  scope: subject
 - id: slk-03-2
   title: Slack File Uploads
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='file_uploaded' | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), File=entity.file.name, FileID=entity.file.id, FileType=entity.file.filetype, Channel=entity.channel.id, IP=context.ip_address, UA=context.ua
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-slack-search-26
   title: Slack search 26
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_slack|slack}}' actor.user.email contains:anycase '{{entity}}' message contains:anycase ('is_ext_shared','shared_channel','external') | columns timestamp, action, actor.user.email, entity.channel.name, context.ip_address, message | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-zia-egress-search-30
   title: ZIA / Egress search 30
   notes: 'Source: zia | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_zia|zia}}' event.user contains:anycase '{{entity}}' event.url contains:anycase ('claude','anthropic','openai','chatgpt','perplexity','gemini.google.com','poe.com','pastebin','gist.github') | columns timestamp, event.user, event.url, event.appname, event.urlcategory, event.action, event.requestmethod, event.outbytes, event.inbytes, event.ClientIP, event.useragent | sort -timestamp | nolimit0
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-zia-egress-search-31
   title: ZIA / Egress search 31
   notes: 'Source: zia | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_zia|zia}}' event.user contains:anycase '{{entity}}' event.url contains:anycase ('dropbox.com','mega.nz','wetransfer.com','transfernow.net','pcloud.com','mediafire.com','icloud.com','onedrive.live.com','drive.google.com','docs.google.com','box.com') | columns timestamp, event.user, event.url, event.appname, event.urlcategory, event.action, event.requestmethod, event.outbytes, event.inbytes, event.ClientIP, event.useragent | sort -timestamp | nolimit0
   merge:
     kind: append
+  scope: subject
 - id: zia-05-2
   title: ZIA AI Tool Activity
   notes: 'Source: zia | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_zia|zia}}' event.user='{{entity}}' | filter event.appname in:anycase ('Claude','ChatGPT','Microsoft Copilot','Google Gemini','Perplexity','Anthropic') OR event.hostname contains:anycase ('claude.ai') OR event.hostname contains:anycase ('chat.openai.com') OR event.hostname contains:anycase ('copilot.microsoft.com') OR event.hostname contains:anycase ('useast.prompt.security') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), App=event.appname, Host=event.hostname, UploadBytes=event.outbytes, Category=event.urlcategory, IP=event.ClientIP
   merge:
     kind: append
+  scope: subject
 - id: zia-03-2
   title: ZIA Cloud Storage / Upload Keyword URL Detail
   notes: 'Source: zia | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_zia|zia}}' event.user='{{entity}}' | filter event.url contains:anycase ('dropbox.com') OR event.url contains:anycase ('box.com') OR event.url contains:anycase ('icloud.com') OR event.url contains:anycase ('mega.nz') OR event.url contains:anycase ('wetransfer.com') OR event.url contains:anycase ('sharefile.com') OR event.url contains:anycase ('onedrive.live.com') OR event.appname in:anycase ('Dropbox','Box','MEGA','WeTransfer','iCloud') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Action=event.action, App=event.appname, URL=event.url, Method=event.requestmethod, UploadBytes=event.outbytes, IP=event.ClientIP
   merge:
     kind: append
+  scope: subject
 - id: dash-3-ai-genai-hunting-ai-network-usage-by-user
   title: AI Network Usage by User
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '3. AI / GenAI Hunting'.
-  pq: serverHost='{{src_zia|zia}}' | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity','Cursor') OR event.hostname contains:anycase('claude.ai','anthropic.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai','cursor.com','cursor.sh','windsurf') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count(), destinations=estimate_distinct(event.hostname) by event.user, event.devicehostname, event.appname | sort -upload_bytes | limit 1000
+  pq: serverHost='{{src_zia|zia}}' | filter ((event.user contains:anycase('{{entity}}') OR event.deviceowner contains:anycase('{{entity}}'))) | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity','Cursor') OR event.hostname contains:anycase('claude.ai','anthropic.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai','cursor.com','cursor.sh','windsurf') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count(), destinations=estimate_distinct(event.hostname) by event.user, event.devicehostname, event.appname | sort -upload_bytes | limit 1000
   merge:
     kind: aggregate
     key_cols:
@@ -409,28 +527,32 @@ queries:
     sum_cols:
     - upload_bytes
     - events
+  scope: subject
 - id: dash-5-shadow-it-webmail-file-sharing-personal-cloud-storage
   title: Personal Cloud Storage
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '5. Shadow IT / Webmail / File Sharing'.
-  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('drive.google.com','dropbox.com','dropboxapi.com','icloud.com','mega.nz','mediafire.com','box.com','wetransfer.com','swisstransfer.com') | columns ts.timestamp=ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts.timestamp | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | filter ((event.user contains:anycase('{{entity}}') OR event.deviceowner contains:anycase('{{entity}}'))) | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('drive.google.com','dropbox.com','dropboxapi.com','icloud.com','mega.nz','mediafire.com','box.com','wetransfer.com','swisstransfer.com') | columns ts.timestamp=ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.appname, event.outbytes, event.action, event.rulelabel | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-5-shadow-it-webmail-file-sharing-personal-webmail-activity
   title: Personal Webmail Activity
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '5. Shadow IT / Webmail / File Sharing'.
-  pq: serverHost='{{src_zia|zia}}' | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('mail.google.com','gmail.com','outlook.live.com','hotmail.com','mail.yahoo.com','proton.me','protonmail.com') | columns ts.timestamp=ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.outbytes, event.action, event.rulelabel | sort -ts.timestamp | limit 5000
+  pq: serverHost='{{src_zia|zia}}' | filter ((event.user contains:anycase('{{entity}}') OR event.deviceowner contains:anycase('{{entity}}'))) | let ts=(event.datetime || timestamp || sca:ingestTime) | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('mail.google.com','gmail.com','outlook.live.com','hotmail.com','mail.yahoo.com','proton.me','protonmail.com') | columns ts.timestamp=ts, event.user, event.deviceowner, event.devicehostname, host, event.url, event.outbytes, event.action, event.rulelabel | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-6-endpoint-exfil-tooling-cloud-cli-sync-tooling
   title: Cloud CLI / Sync Tooling
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '6. Endpoint Exfil Tooling'.
-  pq: event.type in ('Process Creation','Process Start','Process') | let Proc=(src.process.name || tgt.process.name || process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '') | filter Proc contains:anycase('aws','gsutil','megacmd','megasync','boxdrive','drivefs','googledrive','onedrive','dropbox','icloud') OR Cmd contains:anycase(' aws s3 ',' gsutil ',' mega-put ',' mega-cp ',' drivefs ',' googledrive ',' onedrive ',' dropbox ',' icloud ') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''), Path=(src.process.image.path || tgt.process.image.path || '') | sort -ts.timestamp | limit 2000
+  pq: event.type in ('Process Creation','Process Start','Process') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let Proc=(src.process.name || tgt.process.name || process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '') | filter Proc contains:anycase('aws','gsutil','megacmd','megasync','boxdrive','drivefs','googledrive','onedrive','dropbox','icloud') OR Cmd contains:anycase(' aws s3 ',' gsutil ',' mega-put ',' mega-cp ',' drivefs ',' googledrive ',' onedrive ',' dropbox ',' icloud ') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''), Path=(src.process.image.path || tgt.process.image.path || '') | sort -ts.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-8-policy-review-rollups-allowed-high-risk-destinations
   title: Allowed High-Risk Destinations
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '8. Policy Review Rollups'.
-  pq: serverHost='{{src_zia|zia}}' | let host=(event.hostname || event.url || event.dns_req || '') | filter event.action in ('Allow','Allowed','ALLOW') | filter host contains:anycase('wetransfer','mega','mediafire','pastebin','gist.github','dropbox','drive.google','icloud','github','gitlab','bitbucket','telegram','signal') | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by host, event.appname, event.urlcategory, event.rulelabel | sort -total_out | limit 1000
+  pq: serverHost='{{src_zia|zia}}' | filter ((event.user contains:anycase('{{entity}}') OR event.deviceowner contains:anycase('{{entity}}'))) | let host=(event.hostname || event.url || event.dns_req || '') | filter event.action in ('Allow','Allowed','ALLOW') | filter host contains:anycase('wetransfer','mega','mediafire','pastebin','gist.github','dropbox','drive.google','icloud','github','gitlab','bitbucket','telegram','signal') | group events=count(), users=estimate_distinct(event.user), total_out=sum(event.outbytes || 0) by host, event.appname, event.urlcategory, event.rulelabel | sort -total_out | limit 1000
   merge:
     kind: aggregate
     key_cols:
@@ -441,10 +563,11 @@ queries:
     sum_cols:
     - events
     - total_out
+  scope: subject
 - id: dash-2-zia-upload-shadow-it-ai-application-usage-upload-volume
   title: AI Application Usage / Upload Volume
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '2. ZIA Upload & Shadow IT'.
-  pq: serverHost='{{src_zia|zia}}' | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity','Cursor') OR event.hostname contains:anycase('claude.ai','anthropic.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai','cursor.com','cursor.sh') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count(), destinations=estimate_distinct(event.hostname) by event.user, event.devicehostname, event.appname | sort -upload_bytes | limit 1000
+  pq: serverHost='{{src_zia|zia}}' | filter ((event.user contains:anycase('{{entity}}') OR event.deviceowner contains:anycase('{{entity}}'))) | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity','Cursor') OR event.hostname contains:anycase('claude.ai','anthropic.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai','cursor.com','cursor.sh') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count(), destinations=estimate_distinct(event.hostname) by event.user, event.devicehostname, event.appname | sort -upload_bytes | limit 1000
   merge:
     kind: aggregate
     key_cols:
@@ -454,42 +577,49 @@ queries:
     sum_cols:
     - upload_bytes
     - events
+  scope: subject
 - id: dash-4-google-workspace-classification-label-changes
   title: Classification Label Changes
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '4. Google Workspace'.
-  pq: serverHost='{{src_google_workspace|google_workspace}}' | filter event.name == 'label_field_changed' OR classificationLabel = * | columns ts.timestamp=(id.time || timestamp), actor.email, event.owner, event.doc_title, event.doc_id, classificationLabel, event.label_title, event.field, event.new_value, event.new_field_value, ipAddress, actor.applicationInfo.applicationName | sort -ts.timestamp | limit 5000
+  pq: serverHost='{{src_google_workspace|google_workspace}}' | filter ((actor.email contains:anycase('{{entity}}') OR event.owner contains:anycase('{{entity}}'))) | filter event.name == 'label_field_changed' OR classificationLabel = * | columns ts.timestamp=(id.time || timestamp), actor.email, event.owner, event.doc_title, event.doc_id, classificationLabel, event.label_title, event.field, event.new_value, event.new_field_value, ipAddress, actor.applicationInfo.applicationName | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-4-google-workspace-drive-downloads-external-sharing
   title: Drive Downloads / External Sharing
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '4. Google Workspace'.
-  pq: serverHost='{{src_google_workspace|google_workspace}}' | filter event.name in:anycase('download','sync_item_content','access_item_content','change_document_visibility','change_document_access_scope','change_acl_editors','change_user_access','print','copy') | columns ts.timestamp=(id.time || timestamp), actor.email, event.name, event.doc_title, event.doc_id, event.doc_type, event.owner, event.visibility, event.old_visibility, classificationLabel, ipAddress, networkInfo.regionCode, actor.applicationInfo.applicationName | sort -ts.timestamp | limit 5000
+  pq: serverHost='{{src_google_workspace|google_workspace}}' | filter ((actor.email contains:anycase('{{entity}}') OR event.owner contains:anycase('{{entity}}'))) | filter event.name in:anycase('download','sync_item_content','access_item_content','change_document_visibility','change_document_access_scope','change_acl_editors','change_user_access','print','copy') | columns ts.timestamp=(id.time || timestamp), actor.email, event.name, event.doc_title, event.doc_id, event.doc_type, event.owner, event.visibility, event.old_visibility, classificationLabel, ipAddress, networkInfo.regionCode, actor.applicationInfo.applicationName | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-5-prompt-security-ai-ai-apps-installed-zia-usage-candidate-list
   title: AI Apps Installed + ZIA Usage Candidate List
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '5. Prompt Security / AI'.
   pq: '| union ( serverHost=''{{src_oplockdown|oplockdown}}'' | filter tag in (''AI-IDE'',''AI-MISUSE'') OR app_name contains:anycase(''Cursor'',''Perplexity'',''Claude'',''ChatGPT'',''Windsurf'',''Copilot'',''Gemini'') | columns ts.timestamp=timestamp, User=owner, endpoint.name, signal=''installed_ai_app'', app=app_name, detail=tag, bytes=0 ), ( serverHost=''{{src_zia|zia}}'' | filter event.appname contains:anycase(''Claude'',''Anthropic'',''Codeium'',''Windsurf'',''Glean'',''OpenAI'',''ChatGPT'',''Gemini'',''Copilot'',''Perplexity'',''Cursor'') OR event.hostname contains:anycase(''claude.ai'',''anthropic.com'',''openai.com'',''chatgpt.com'',''gemini.google.com'',''perplexity.ai'',''cursor.com'',''cursor.sh'') | columns ts.timestamp=(event.datetime || timestamp), User=event.user, endpoint.name=event.devicehostname, signal=''zia_ai_usage'', app=event.appname, detail=event.hostname, bytes=(event.outbytes || ZENTotalBytesTxClient || 0) ) | sort User, -ts.timestamp | limit 5000'
   merge:
     kind: append
+  scope: environment
 - id: dash-6-icloud-apple-sync-icloud-file-timeline
   title: iCloud File Timeline
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '6. iCloud / Apple Sync'.
-  pq: event.category='file' | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | columns ts.timestamp=event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, event.type, tgt.file.path, tgt.file.size, tgt.file.sha1, src.process.storyline.id | sort -ts.timestamp | limit 5000
+  pq: event.category='file' | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | columns ts.timestamp=event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, event.type, tgt.file.path, tgt.file.size, tgt.file.sha1, src.process.storyline.id | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-6-icloud-apple-sync-large-files-written-to-icloud-100mb
   title: Large Files Written to iCloud >100MB
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '6. iCloud / Apple Sync'.
-  pq: event.category='file' | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | filter tgt.file.size > 104857600 | columns ts.timestamp=event.time, endpoint.name, src.process.user, src.process.name, event.type, tgt.file.path, SizeMB=(tgt.file.size/1024/1024), tgt.file.sha1, src.process.storyline.id | sort -SizeMB | limit 2000
+  pq: event.category='file' | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | filter tgt.file.size > 104857600 | columns ts.timestamp=event.time, endpoint.name, src.process.user, src.process.name, event.type, tgt.file.path, SizeMB=(tgt.file.size/1024/1024), tgt.file.sha1, src.process.storyline.id | sort -SizeMB | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-8-correlation-timelines-sensitive-access-endpoint-staging-zia-egr
   title: Sensitive Access + Endpoint Staging + ZIA Egress
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '8. Correlation Timelines'.
   pq: '| union ( serverHost=''{{src_google_workspace|google_workspace}}'' | filter classificationLabel in:anycase(''Highly Confidential'',''Confidential'') OR event.name in:anycase(''download'',''change_document_visibility'',''change_document_access_scope'') | let user_name=(actor.email || event.owner || '''') | columns ts.timestamp=(timestamp || id.time || event.time), user_name, signal=''workspace_sensitive_activity'', object=(event.doc_title || event.doc_id || ''-''), detail=(event.name || classificationLabel), endpoint=''-'', bytes=0 ), ( event.type in (''File Creation'',''File Modification'') | filter tgt.file.extension in:anycase(''zip'',''rar'',''7z'',''tar'',''gz'',''tgz'',''pst'',''mbox'') OR tgt.file.path contains:anycase(''\\Downloads\\'') OR tgt.file.path contains:anycase(''\\Desktop\\'') OR tgt.file.path contains:anycase(''\\Documents\\'') OR tgt.file.path contains:anycase(''/Downloads/'') OR tgt.file.path contains:anycase(''/Desktop/'') OR tgt.file.path contains:anycase(''/Documents/'') OR tgt.file.path contains:anycase(''/tmp/'') | let user_name=(src.process.user || user.name || '''') | columns ts.timestamp=(event.time || timestamp), user_name, signal=''endpoint_staging'', object=(tgt.file.path || ''-''), detail=(tgt.file.extension || src.process.name), endpoint=endpoint.name, bytes=(tgt.file.size || 0) ), ( serverHost=''{{src_zia|zia}}'' | let user_name=(event.user || '''') | let url=(event.url || event.hostname || event.dns_req || ''-'') | let method=(event.requestmethod || event.method || '''') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | filter method in (''POST'',''PUT'') OR url contains:anycase(''upload'',''put'',''attachment'',''share'',''files'',''api'') OR outB > 5000000 | columns ts.timestamp=(event.datetime || timestamp || sca:ingestTime), user_name, signal=''zia_egress'', object=url, detail=(event.action || event.appname), endpoint=event.devicehostname, bytes=outB ) | sort user_name, -ts.timestamp | limit 10000'
   merge:
     kind: append
+  scope: subject
 - id: dash-1-executive-summary-icloud-file-events
   title: iCloud File Events
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '1. Executive Summary'.
@@ -498,22 +628,25 @@ queries:
     kind: aggregate
     key_cols:
     - Source
+  scope: environment
 - id: dash-1-executive-summary-combined-high-signal-timeline
   title: Combined High-Signal Timeline
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '1. Executive Summary'.
   pq: '| union ( serverHost=''{{src_oplockdown|oplockdown}}'' | filter tag in (''VPN'',''RemoteManagement'',''Filesharing'',''Peer-To-Peer'',''AI-IDE'',''AI-MISUSE'',''Games'') | columns ts=timestamp, Source=''OpLockdown'', User=owner, Endpoint=endpoint.name, Signal=tag, Object=app_name, Detail=type, Bytes=0 ), ( serverHost=''{{src_zia|zia}}'' | let ts=(event.datetime || timestamp || sca:ingestTime) | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let host=(event.hostname || event.url || event.dns_req || '''') | filter outB > 5000000 OR host contains:anycase(''icloud'',''dropbox'',''wetransfer'',''swisstransfer'',''mega'',''mediafire'',''pastebin'',''gist.github'',''claude'',''chatgpt'',''openai'',''perplexity'',''cursor'',''anthropic'') | columns ts, Source=''ZIA'', User=event.user, Endpoint=event.devicehostname, Signal=(event.appname || event.urlcategory), Object=host, Detail=(event.action || event.requestmethod), Bytes=outB ), ( serverHost=''{{src_prompt_security|prompt-security}}'' | filter log.isValid == true | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | columns ts, Source=''Prompt Security'', User=log.user, Endpoint=log.sensor.machine, Signal=(log.policyName || ''Prompt violation''), Object=(log.application.name || log.sensor.pageDomain), Detail=log.violations, Bytes=0 ), ( event.category=''file'' | filter tgt.file.path contains:anycase(''Mobile Documents'') OR tgt.file.path contains:anycase(''iCloud Drive'') OR tgt.file.path contains:anycase(''com~apple~CloudDocs'') | columns ts=(event.time || timestamp), Source=''EDR iCloud'', User=src.process.user, Endpoint=endpoint.name, Signal=event.type, Object=tgt.file.path, Detail=src.process.name, Bytes=(tgt.file.size || 0) ) | sort -ts | limit 1000'
   merge:
     kind: append
+  scope: subject
 - id: dash-3-edr-staging-tooling-transfer-exfil-tool-execution
   title: Transfer / Exfil Tool Execution
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '3. EDR Staging & Tooling'.
-  pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') OR dataSource.category == ''process'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''rclone'',''scp'',''sftp'',''rsync'',''curl'',''wget'',''aws'',''gsutil'',''megacmd'',''megasync'',''onedrive'',''dropbox'',''drivefs'',''box'',''icloud'') OR Cmd contains:anycase('' rclone '','' scp '','' sftp '','' rsync '','' curl '','' wget '','' aws s3 '','' gsutil '','' mega-put '','' mega-cp '','' onedrive '','' dropbox '','' icloud '') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''''), Path=(src.process.image.path || tgt.process.image.path || '''') | sort -timestamp | limit 2000'
+  pq: '| filter ((agent.uuid == ''{{agent_uuid}}'' OR endpoint.name contains:anycase(''{{hostname}}'') OR src.process.user contains:anycase(''{{username}}''))) | filter event.type in (''Process Creation'',''Process Start'',''Process'') OR dataSource.category == ''process'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''rclone'',''scp'',''sftp'',''rsync'',''curl'',''wget'',''aws'',''gsutil'',''megacmd'',''megasync'',''onedrive'',''dropbox'',''drivefs'',''box'',''icloud'') OR Cmd contains:anycase('' rclone '','' scp '','' sftp '','' rsync '','' curl '','' wget '','' aws s3 '','' gsutil '','' mega-put '','' mega-cp '','' onedrive '','' dropbox '','' icloud '') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''''), Path=(src.process.image.path || tgt.process.image.path || '''') | sort -timestamp | limit 2000'
   merge:
     kind: append
+  scope: subject
 - id: dash-4-zia-egress-dlp-ai-application-usage-upload-volume
   title: AI Application Usage / Upload Volume
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '4. ZIA Egress & DLP'.
-  pq: serverHost='{{src_zia|zia}}' | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity','Cursor') OR event.hostname contains:anycase('claude.ai','anthropic.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai','cursor.com','cursor.sh','windsurf.ai','codeium.com') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count(), hosts=array_agg_distinct(event.hostname,20) by event.user,event.appname | sort -upload_bytes | limit 1000
+  pq: serverHost='{{src_zia|zia}}' | filter ((event.user contains:anycase('{{entity}}') OR event.deviceowner contains:anycase('{{entity}}'))) | filter event.appname contains:anycase('Claude','Anthropic','Codeium','Windsurf','Glean','OpenAI','ChatGPT','Gemini','Copilot','Perplexity','Cursor') OR event.hostname contains:anycase('claude.ai','anthropic.com','openai.com','chatgpt.com','gemini.google.com','perplexity.ai','cursor.com','cursor.sh','windsurf.ai','codeium.com') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | group upload_bytes=sum(outB), events=count(), hosts=array_agg_distinct(event.hostname,20) by event.user,event.appname | sort -upload_bytes | limit 1000
   merge:
     kind: aggregate
     key_cols:
@@ -522,48 +655,56 @@ queries:
     sum_cols:
     - upload_bytes
     - events
+  scope: subject
 - id: dash-5-icloud-apple-sync-icloud-file-timeline
   title: iCloud File Timeline
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '5. iCloud / Apple Sync'.
-  pq: event.category='file' | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | columns event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, event.type, tgt.file.path, tgt.file.size, tgt.file.sha1, src.process.storyline.id | sort -event.time | limit 3000
+  pq: event.category='file' | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | columns event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, event.type, tgt.file.path, tgt.file.size, tgt.file.sha1, src.process.storyline.id | sort -event.time | limit 3000
   merge:
     kind: append
+  scope: subject
 - id: dash-5-icloud-apple-sync-large-files-written-to-icloud-100mb
   title: Large Files Written to iCloud >100MB
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '5. iCloud / Apple Sync'.
-  pq: event.category='file' | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | filter tgt.file.size > 104857600 | columns event.time, endpoint.name, src.process.user, src.process.name, event.type, tgt.file.path, SizeMB=(tgt.file.size/1024/1024), tgt.file.sha1, src.process.storyline.id | sort -SizeMB | limit 1000
+  pq: event.category='file' | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter tgt.file.path contains:anycase('Mobile Documents') OR tgt.file.path contains:anycase('iCloud Drive') OR tgt.file.path contains:anycase('com~apple~CloudDocs') OR tgt.file.path contains:anycase('CloudDocs') | filter tgt.file.size > 104857600 | columns event.time, endpoint.name, src.process.user, src.process.name, event.type, tgt.file.path, SizeMB=(tgt.file.size/1024/1024), tgt.file.sha1, src.process.storyline.id | sort -SizeMB | limit 1000
   merge:
     kind: append
+  scope: subject
 - id: dash-6-ai-prompt-security-ai-apps-installed-zia-usage-candidate-list
   title: AI Apps Installed + ZIA Usage Candidate List
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '6. AI / Prompt Security'.
   pq: '| union ( serverHost=''{{src_oplockdown|oplockdown}}'' | filter tag in (''AI-IDE'',''AI-MISUSE'') | columns ts=timestamp, User=owner, Endpoint=endpoint.name, Source=''OpLockdown'', App=app_name, Detail=tag, Bytes=0 ), ( serverHost=''{{src_zia|zia}}'' | filter event.appname contains:anycase(''Claude'',''Anthropic'',''Codeium'',''Windsurf'',''Glean'',''OpenAI'',''ChatGPT'',''Gemini'',''Copilot'',''Perplexity'',''Cursor'') OR event.hostname contains:anycase(''claude.ai'',''anthropic.com'',''openai.com'',''chatgpt.com'',''gemini.google.com'',''perplexity.ai'',''cursor.com'',''cursor.sh'',''windsurf.ai'',''codeium.com'') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | columns ts=(event.datetime || timestamp), User=event.user, Endpoint=event.devicehostname, Source=''ZIA'', App=event.appname, Detail=event.hostname, Bytes=outB ) | sort -ts | limit 3000'
   merge:
     kind: append
+  scope: environment
 - id: dash-7-google-workspace-drive-drive-downloads-external-sharing
   title: Drive Downloads / External Sharing
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '7. Google Workspace & Drive'.
-  pq: serverHost == 'google_workspace' | filter event.name in:anycase('download','sync_item_content','access_item_content','change_document_visibility','change_document_access_scope','shared_drive_file_downloaded','copy','print') OR event.visibility in:anycase('shared_externally','public') | columns timestamp=(id.time || timestamp), actor.email, event.name, event.doc_title, event.doc_id, event.doc_type, event.owner, event.visibility, event.old_visibility, classificationLabel, ipAddress, actor.applicationInfo.applicationName | sort -timestamp | limit 3000
+  pq: serverHost == 'google_workspace' | filter ((actor.email contains:anycase('{{entity}}') OR event.owner contains:anycase('{{entity}}'))) | filter event.name in:anycase('download','sync_item_content','access_item_content','change_document_visibility','change_document_access_scope','shared_drive_file_downloaded','copy','print') OR event.visibility in:anycase('shared_externally','public') | columns timestamp=(id.time || timestamp), actor.email, event.name, event.doc_title, event.doc_id, event.doc_type, event.owner, event.visibility, event.old_visibility, classificationLabel, ipAddress, actor.applicationInfo.applicationName | sort -timestamp | limit 3000
   merge:
     kind: append
+  scope: subject
 - id: dash-7-google-workspace-drive-classification-label-changes
   title: Classification Label Changes
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '7. Google Workspace & Drive'.
-  pq: serverHost == 'google_workspace' | filter actor.applicationInfo.applicationName != 'SCIO Search' | filter event.name == 'label_field_changed' AND event.field == 'Data Sensitivity Levels' | columns id.time, actor.email, event.owner, event.doc_title, event.doc_id, event.doc_type, event.label_title, event.field, event.new_value, event.new_field_value, ipAddress, networkInfo.regionCode, networkInfo.subdivisionCode, actor.applicationInfo.applicationName | sort -id.time | limit 2000
+  pq: serverHost == 'google_workspace' | filter ((actor.email contains:anycase('{{entity}}') OR event.owner contains:anycase('{{entity}}'))) | filter actor.applicationInfo.applicationName != 'SCIO Search' | filter event.name == 'label_field_changed' AND event.field == 'Data Sensitivity Levels' | columns id.time, actor.email, event.owner, event.doc_title, event.doc_id, event.doc_type, event.label_title, event.field, event.new_value, event.new_field_value, ipAddress, networkInfo.regionCode, networkInfo.subdivisionCode, actor.applicationInfo.applicationName | sort -id.time | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-10-correlation-sensitive-journey-sensitive-access-endpoint-stagin
   title: Sensitive Access + Endpoint Staging + ZIA Egress
   notes: 'Imported from dashboard ''Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.'' tab ''10. Correlation: Sensitive Journey''.'
   pq: '| union ( serverHost == ''google_workspace'' | filter classificationLabel in:anycase(''Highly Confidential'',''Confidential'') | filter event.name in:anycase(''download'',''sync_item_content'',''access_item_content'',''view'',''copy'',''print'',''change_document_visibility'',''change_document_access_scope'') | let user_name=(actor.email || event.owner || '''') | columns timestamp=(timestamp || id.time || event.time), user_name, signal=''workspace_sensitive_activity'', object=(event.doc_title || event.doc_id || ''-''), detail=(event.name || classificationLabel), endpoint=''-'', bytes=0 ), ( serverHost=''{{src_salesforce_realtime|salesforce-realtime}}'' | filter detail.payload.RowsReturned > 0 OR detail.payload.RowsProcessed > 0 OR detail.payload.ReportId = * | let user_name=detail.payload.Username | columns timestamp=(detail.payload.EventDate || detail.payload.CreatedDate || timestamp), user_name, signal=''salesforce_report_or_rows'', object=(detail.payload.ReportId || detail.payload.Query || ''-''), detail=(detail.payload.Operation || detail.payload.AppName), endpoint=''-'', bytes=(detail.payload.ContentSize || 0) ), ( | filter event.type == ''File Creation'' AND (tgt.file.extension in:anycase(''zip'',''rar'',''7z'',''tar'',''gz'',''tgz'',''pst'',''mbox'') OR tgt.file.path matches ''(?i).*/(Downloads|Desktop|Documents|tmp|Temp)/.*'' OR tgt.file.path matches ''(?i).*\\Users\\.*\\(Downloads|Desktop|Documents)\\.*'') | let user_name=(src.process.user || user.name || '''') | columns timestamp=(event.time || timestamp), user_name, signal=''endpoint_staging'', object=(tgt.file.path || ''-''), detail=(tgt.file.extension || src.process.name), endpoint=endpoint.name, bytes=(tgt.file.size || 0) ), ( serverHost == ''zia'' | let user_name=(event.user || '''') | let url=(event.url || event.hostname || event.dns_req || ''-'') | let method=(event.requestmethod || event.method || '''') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | let isUpload=(method in (''POST'',''PUT'') OR url contains:anycase(''upload'',''put'',''attachment'',''share'',''files'',''api'') OR outB > 5000000) | filter isUpload | columns timestamp=(event.datetime || timestamp || sca:ingestTime), user_name, signal=''zia_egress'', object=url, detail=(event.action || event.appname), endpoint=event.devicehostname, bytes=outB ) | sort user_name, timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: itm-collection-sensitive-doc-access
   title: Sensitive document access and collection
   notes: 'Generated SOC library detection. Source: google_workspace. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost='{{src_google_workspace|google_workspace}}' actor.email='{{entity}}' | filter classificationLabel in:anycase('Highly Confidential','Confidential') | filter event.name in:anycase('download','sync_item_content','access_item_content','copy','print') | columns timestamp, actor.email, event.name, event.doc_title, event.doc_id, classificationLabel, ipAddress | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: itm-collection-bulk-drive-downloads
   title: Bulk Google Drive downloads
   notes: 'Generated SOC library detection. Source: google_workspace. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
@@ -576,24 +717,28 @@ queries:
     - actor.email
     sum_cols:
     - downloads
+  scope: subject
 - id: itm-collection-slack-files
   title: Slack file download activity
   notes: 'Generated SOC library detection. Source: slack. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action='file_downloaded' | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot') | columns timestamp, actor.user.email, entity.file.name, entity.channel.id, context.ip_address, context.ua | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: itm-exfil-cloud-storage
   title: Personal cloud storage egress
   notes: 'Generated SOC library detection. Source: zia. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost='{{src_zia|zia}}' event.user='{{entity}}' | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('dropbox.com','icloud.com','mega.nz','wetransfer.com','drive.google.com','box.com','mediafire.com','gofile.io','file.io') | columns timestamp,event.user,event.devicehostname,host,event.url,event.appname,event.outbytes,event.action,event.requestmethod | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: itm-exfil-webmail
   title: Personal webmail egress
   notes: 'Generated SOC library detection. Source: zia. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost='{{src_zia|zia}}' event.user='{{entity}}' | let host=(event.hostname || event.url || '') | filter host contains:anycase('gmail.com','mail.google.com','outlook.live.com','hotmail.com','mail.yahoo.com','protonmail.com','proton.me') | columns timestamp,event.user,event.devicehostname,host,event.url,event.outbytes,event.action,event.requestmethod | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: mitre-t1567-exfil-web-service
   title: Exfiltration to web service
   notes: 'Generated SOC library detection. Source: zia. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
@@ -607,12 +752,14 @@ queries:
     sum_cols:
     - UploadMB
     - Events
+  scope: subject
 - id: zgen-cloud-storage-raw
   title: ZIA Raw Activity — Cloud Storage
   notes: Generated category hunt for cloud_storage.
   pq: serverHost='{{src_zia|zia}}' event.user='{{entity}}' | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('dropbox.com','drive.google.com','icloud.com','mega.nz','box.com','onedrive.live.com','wetransfer.com','swisstransfer.com') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | columns timestamp,event.user,event.devicehostname,host,event.url,event.appname,event.action,event.requestmethod,outB,event.destcountry | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: zgen-cloud-storage-summary
   title: ZIA Summary — Cloud Storage
   notes: Generated rollup for cloud_storage.
@@ -627,12 +774,14 @@ queries:
     sum_cols:
     - UploadMB
     - Events
+  scope: subject
 - id: zgen-ai-tools-raw
   title: ZIA Raw Activity — Ai Tools
   notes: Generated category hunt for ai_tools.
   pq: serverHost='{{src_zia|zia}}' event.user='{{entity}}' | let host=(event.hostname || event.url || event.dns_req || '') | filter host contains:anycase('claude.ai','anthropic.com','chatgpt.com','openai.com','gemini.google.com','perplexity.ai','cursor.com','windsurf.ai') | let outB=(event.outbytes || ZENTotalBytesTxClient || 0) | columns timestamp,event.user,event.devicehostname,host,event.url,event.appname,event.action,event.requestmethod,outB,event.destcountry | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: zgen-ai-tools-summary
   title: ZIA Summary — Ai Tools
   notes: Generated rollup for ai_tools.
@@ -647,3 +796,4 @@ queries:
     sum_cols:
     - UploadMB
     - Events
+  scope: subject

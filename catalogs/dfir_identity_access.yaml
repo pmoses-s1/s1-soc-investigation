@@ -3,279 +3,372 @@ queries:
 - id: cov-01
   title: All Log Sources — Count by serverHost
   notes: 'Which log sources have data for this user? Run this first to know what you''re working with. | Source: All | Pivot if positive: Any source with 0 events — verify ingestion before concluding absence'
-  pq: |-
-    (actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or USER_ID_DERIVED contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or detail.payload.Username contains:anycase("{{entity}}") or detail.payload.UserId contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or owner contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+  pq: '(actor.email contains:anycase("{{entity}}") or actor.profileId contains:anycase("{{entity}}") or actor.alternateId contains:anycase("{{entity}}") or actor.user.email contains:anycase("{{entity}}") or actor.email_address contains:anycase("{{entity}}") or user contains:anycase("{{entity}}") or user.email contains:anycase("{{entity}}") or userName contains:anycase("{{entity}}") or USER_ID contains:anycase("{{entity}}") or USER_ID_DERIVED contains:anycase("{{entity}}") or username contains:anycase("{{entity}}") or detail.payload.Username contains:anycase("{{entity}}") or detail.payload.UserId contains:anycase("{{entity}}") or email contains:anycase("{{entity}}") or login contains:anycase("{{entity}}") or elogin contains:anycase("{{entity}}") or account contains:anycase("{{entity}}") or owner contains:anycase("{{entity}}") or operator contains:anycase("{{entity}}") or src.process.user contains:anycase("{{entity}}") or created_by.login contains:anycase("{{entity}}") or created_by.name contains:anycase("{{entity}}") or target_user.email contains:anycase("{{entity}}") or initiated_by.email contains:anycase("{{entity}}") or initiated_by.username contains:anycase("{{entity}}") or userIdentity.arn contains:anycase("{{entity}}") or userIdentity.sessionContext.sessionIssuer contains:anycase("{{entity}}") or ipAddress contains:anycase("{{entity}}") or ip contains:anycase("{{entity}}") or session contains:anycase("{{entity}}") or event.client_id contains:anycase("{{entity}}") or event.app_name contains:anycase("{{entity}}") or event.api_name contains:anycase("{{entity}}") or id.applicationName contains:anycase("{{entity}}") or "Source User" contains:anycase("{{entity}}"))
+
     | group EventCount=count(), FirstSeen.timestamp=min(timestamp), LastSeen.timestamp=max(timestamp) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: cov-02
   title: Okta Source Coverage
   notes: 'What Okta data exists for this user? First/last event, count, countries, IPs. | Source: okta | Pivot if positive: Okta tab for full timeline'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}'
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}''
+
     | let ts=(timestamp || published || event.time || sca:ingestTime)
+
     | filter ts != null
+
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), Countries=array_agg_distinct(client.geographicalContext.country, 10), IPs=array_agg_distinct(client.ipAddress, 10) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: cov-03
   title: ZPA / Zscaler Session Coverage
   notes: 'What ZPA tunnel data exists? Confirms Zscaler was active and shows countries, public IPs. | Source: zscaler | Pivot if positive: ZIA tab for web history'
-  pq: |-
-    serverHost='{{src_zscaler|zscaler}}'
-    | filter actor.email contains:anycase('{{entity}}') OR actor.email contains:anycase('{{username}}') OR Username contains:anycase('{{entity}}') OR Username contains:anycase('{{username}}') OR event.users contains:anycase('{{entity}}') OR event.users contains:anycase('{{username}}')
+  pq: 'serverHost=''{{src_zscaler|zscaler}}''
+
+    | filter actor.email contains:anycase(''{{entity}}'') OR actor.email contains:anycase(''{{username}}'') OR Username contains:anycase(''{{entity}}'') OR Username contains:anycase(''{{username}}'') OR event.users contains:anycase(''{{entity}}'') OR event.users contains:anycase(''{{username}}'')
+
     | let ts=(TimestampConnectionStart || timestamp || sca:ingestTime)
+
     | filter ts != null
+
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), Countries=array_agg_distinct(ClientCountryCode, 10), PublicIPs=array_agg_distinct(ClientPublicIP, 10) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: cov-04
   title: ZIA Web Proxy Coverage
   notes: 'What ZIA data exists for this user? Confirms proxy was active. | Source: zia | Pivot if positive: ZIA tab'
-  pq: |-
-    serverHost='{{src_zia|zia}}' event.user='{{entity}}'
+  pq: 'serverHost=''{{src_zia|zia}}'' event.user=''{{entity}}''
+
     | let ts=(timestamp || event.time || sca:ingestTime)
+
     | filter ts != null
+
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), ClientIPs=array_agg_distinct(event.ClientIP, 10), Apps=array_agg_distinct(event.appname, 10) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: cov-05
   title: EDR Source Coverage — by Username
   notes: 'What endpoint telemetry exists for this username? Confirms S1 agent was active. | Source: SentinelOne EDR | Pivot if positive: Endpoint tab'
-  pq: |-
-    | filter src.process.user contains:anycase('{{username}}') OR event.login.userName contains:anycase('{{username}}')
+  pq: '| filter src.process.user contains:anycase(''{{username}}'') OR event.login.userName contains:anycase(''{{username}}'')
+
     | let ts=(timestamp || event.time || published || sca:ingestTime)
+
     | filter ts != null
+
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), Endpoints=array_agg_distinct(endpoint.name, 20), AgentUUIDs=array_agg_distinct(agent.uuid, 20), EventTypes=array_agg_distinct(event.type, 20) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: cov-06
   title: EDR Coverage Calendar — by Agent UUID
   notes: 'Was the endpoint active every day? Gaps in coverage could indicate device was off or agent disabled. | Source: SentinelOne EDR | Pivot if positive: Endpoint tab — check agent health dashboard for those dates'
-  pq: |-
-    | filter agent.uuid == '{{agent_uuid}}'
+  pq: '| filter agent.uuid == ''{{agent_uuid}}''
+
     | let ts=(timestamp || event.time || published || sca:ingestTime)
+
     | filter ts != null
-    | group Events=count(), EventTypes=array_agg_distinct(event.type, 20), Users=array_agg_distinct(src.process.user, 10) by Day.timestamp=timebucket(ts, '1d')
+
+    | group Events=count(), EventTypes=array_agg_distinct(event.type, 20), Users=array_agg_distinct(src.process.user, 10) by Day.timestamp=timebucket(ts, ''1d'')
+
     | sort -Day.timestamp
-    | limit 1000
+
+    | limit 1000'
+  scope: subject
 - id: cov-07
   title: Navan Travel Coverage
   notes: 'Does Navan have travel bookings for this user? Corroborates geo anomalies. | Source: navan-travel-bookings | Pivot if positive: Travel tab'
-  pq: |-
-    serverHost='{{src_navan_travel_bookings|navan-travel-bookings}}'
-    | filter passengers.person.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{username}}') OR booker.email contains:anycase('{{entity}}')
+  pq: 'serverHost=''{{src_navan_travel_bookings|navan-travel-bookings}}''
+
+    | filter passengers.person.email contains:anycase(''{{entity}}'') OR loggedAsUserName contains:anycase(''{{username}}'') OR booker.email contains:anycase(''{{entity}}'')
+
     | let ts=(timestamp || created || lastModified || sca:ingestTime)
+
     | filter ts != null
+
     | group FirstSeen.timestamp=min(ts), LastSeen.timestamp=max(ts), EventCount=count(), Purposes=array_agg_distinct(purpose, 10) by Source=serverHost
+
     | sort -EventCount
-    | limit 100
+
+    | limit 100'
+  scope: subject
 - id: lkp-01
   title: User / Device Identity Lookup
   notes: 'What devices, GitHub username, aliases, Jamf/Intune/JumpCloud records exist for this user? | Source: Config Datatables | Pivot if positive: Use github.name in GitHub dashboard filter; jamf.comp/intune.comp as HOSTNAME placeholder'
-  pq: |-
-    | union
-      (| dataset 'config://datatables/{{dt_costcenters}}' | columns email, Hire_Date),
-      (| dataset 'config://datatables/{{dt_accounts_github}}' | columns email, github.name=username | let glean='https://app.glean.com/directory/people/profile?person='+email),
-      (| dataset 'config://datatables/{{dt_accounts_jamf}}' | columns 'jamf.comp'=Computer_Name,'jamf.name'=Username,email),
-      (| dataset 'config://datatables/{{dt_accounts_google}}' | columns google.name,email,google.email,google.aliases),
-      (| dataset 'config://datatables/{{dt_accounts_intune}}' | columns email,'intune.comp'=displayName),
-      (| dataset 'config://datatables/{{dt_jumpcloud_user_summary}}' | columns email,'jumpcloud.comp'=hostname,jumpcloud.user=username)
-    | filter email == '{{entity}}'
-    | columns email, Hire_Date, github.name, jamf.comp, jamf.name, google.name, google.email, google.aliases, intune.comp, jumpcloud.comp, jumpcloud.user
-    | sort +email
+  pq: "| union\n  (| dataset 'config://datatables/{{dt_costcenters}}' | columns email, Hire_Date),\n  (| dataset 'config://datatables/{{dt_accounts_github}}' | columns email, github.name=username | let glean='https://app.glean.com/directory/people/profile?person='+email),\n  (| dataset 'config://datatables/{{dt_accounts_jamf}}' | columns 'jamf.comp'=Computer_Name,'jamf.name'=Username,email),\n  (| dataset 'config://datatables/{{dt_accounts_google}}' | columns google.name,email,google.email,google.aliases),\n  (| dataset 'config://datatables/{{dt_accounts_intune}}' | columns email,'intune.comp'=displayName),\n  (| dataset 'config://datatables/{{dt_jumpcloud_user_summary}}' | columns email,'jumpcloud.comp'=hostname,jumpcloud.user=username)\n| filter email == '{{entity}}'\n| columns email, Hire_Date, github.name, jamf.comp, jamf.name, google.name, google.email, google.aliases, intune.comp, jumpcloud.comp, jumpcloud.user\n| sort +email"
+  scope: subject
 - id: lkp-02
   title: Dashboard Search Builder — Intune + Jamf
   notes: 'Build a reusable search string covering all known device names for this user — paste into alert dashboards. | Source: Config Datatables | Pivot if positive: Paste into _SOC - Homepage or FOR_ dashboard search box'
-  pq: |-
-    | sql outer join
-      windows=(| dataset 'config://datatables/{{dt_accounts_intune}}' | group comp=array_agg_distinct(displayName) by email | columns email, list="actor.email = '" + email + "' or device.name in ('" + replace(comp.to_string(), ',', "','") + "')" ),
-      mac=(| dataset 'config://datatables/{{dt_accounts_jamf}}' | group comp=array_agg_distinct(Computer_Name) by email | columns email, list="actor.email = '" + email + "' or device.name in ('" + replace(comp.to_string(), ',', "','") + "')")
-      on email
-    | filter email == '{{entity}}'
+  pq: "| sql outer join\n  windows=(| dataset 'config://datatables/{{dt_accounts_intune}}' | group comp=array_agg_distinct(displayName) by email | columns email, list=\"actor.email = '\" + email + \"' or device.name in ('\" + replace(comp.to_string(), ',', \"','\") + \"')\" ),\n  mac=(| dataset 'config://datatables/{{dt_accounts_jamf}}' | group comp=array_agg_distinct(Computer_Name) by email | columns email, list=\"actor.email = '\" + email + \"' or device.name in ('\" + replace(comp.to_string(), ',', \"','\") + \"')\")\n  on email\n| filter email == '{{entity}}'"
+  scope: subject
 - id: lkp-03
   title: Cost Center / HR Context
   notes: 'What is the user''s role, manager, cost center, and hire date? | Source: Config Datatables | Pivot if positive: Use hire date to establish baseline period; use role for context on access scope'
-  pq: |-
-    | dataset 'config://datatables/{{dt_costcenters}}'
-    | filter email == '{{entity}}'
-    | columns email, Hire_Date
+  pq: '| dataset ''config://datatables/{{dt_costcenters}}''
+
+    | filter email == ''{{entity}}''
+
+    | columns email, Hire_Date'
+  scope: subject
 - id: okt-01
   title: Okta Full Raw Timeline
   notes: 'Complete authentication and session timeline with IP, geo, ISP, OS, browser, user agent. | Source: okta | Pivot if positive: New country → ZIA/ZPA location. New device → LKP-01. Failures then success → OKT-04'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}'
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}''
+
     | let ts=(timestamp || published || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 5000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Actor=actor.alternateId, EventType=eventType, Result=outcome.result, ActorIP=actor.ip, ClientIP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, ISP=actor.isp, OS=client.userAgent.os, Browser=client.userAgent.browser, RawUA=client.userAgent.rawUserAgent
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Actor=actor.alternateId, EventType=eventType, Result=outcome.result, ActorIP=actor.ip, ClientIP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, ISP=actor.isp, OS=client.userAgent.os, Browser=client.userAgent.browser, RawUA=client.userAgent.rawUserAgent'
+  scope: subject
 - id: okt-02
   title: Okta Country / City / ISP Summary
   notes: 'Clean human-presence location summary — successful human auth only, no automation noise. | Source: okta | Pivot if positive: New country → ZPA COV-03. Travel tab for Navan corroboration'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='SUCCESS' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
-    | filter eventType contains ('user.session.start', 'user.authentication.sso', 'user.authentication.auth_via_mfa')
-    | group DaysActive=estimate_distinct(timebucket(published,'1d')), Events=count(), IPs=array_agg_distinct(client.ipAddress, 10), ISPs=array_agg_distinct(actor.isp, 5) by Country=client.geographicalContext.country, State=client.geographicalContext.state, City=client.geographicalContext.city
-    | sort -DaysActive
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' outcome.result=''SUCCESS'' client.geographicalContext.country=* client.userAgent.browser=* client.userAgent.os=*
+
+    | filter eventType contains (''user.session.start'', ''user.authentication.sso'', ''user.authentication.auth_via_mfa'')
+
+    | group DaysActive=estimate_distinct(timebucket(published,''1d'')), Events=count(), IPs=array_agg_distinct(client.ipAddress, 10), ISPs=array_agg_distinct(actor.isp, 5) by Country=client.geographicalContext.country, State=client.geographicalContext.state, City=client.geographicalContext.city
+
+    | sort -DaysActive'
+  scope: subject
 - id: okt-03
   title: Okta App Access Summary
   notes: 'Which apps did the user access via Okta SSO? Volume per app over time. | Source: okta | Pivot if positive: Unusual new app → check that source log directly (Salesforce, Atlassian, etc.)'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.authentication.sso'
-    | group Events=count() by App=target.displayName, Day.timestamp=timebucket(published,'1d')
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' eventType=''user.authentication.sso''
+
+    | group Events=count() by App=target.displayName, Day.timestamp=timebucket(published,''1d'')
+
     | sort -Day.timestamp
-    | transpose App on Day.timestamp
+
+    | transpose App on Day.timestamp'
+  scope: subject
 - id: okt-04
   title: Okta Failed Events
   notes: 'Authentication failures — wrong password, MFA errors, locked out. Look for failures before success. | Source: okta | Pivot if positive: Failures from new IP/country followed by success → account takeover concern'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='FAILURE'
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' outcome.result=''FAILURE''
+
     | let ts=(timestamp || published || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Reason=outcome.reason, IP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, OS=client.userAgent.os, Browser=client.userAgent.browser
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), EventType=eventType, Reason=outcome.reason, IP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, OS=client.userAgent.os, Browser=client.userAgent.browser'
+  scope: subject
 - id: okt-05
   title: Okta MFA Factor Activations
   notes: 'Did the user add a new MFA factor or device? New factor = potential attacker persistence. | Source: okta | Pivot if positive: New factor + new geo + sensitive app access = high concern'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS'
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' eventType=''user.mfa.factor.activate'' outcome.result=''SUCCESS''
+
     | let ts=(timestamp || published || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 500
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Factor=target.displayName, IP=client.ipAddress, Country=client.geographicalContext.country, Reason=outcome.reason
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), EventType=eventType, Factor=target.displayName, IP=client.ipAddress, Country=client.geographicalContext.country, Reason=outcome.reason'
+  scope: subject
 - id: okt-06
   title: Okta Device Activations
   notes: 'Was a new device enrolled in Okta? Shows device type, OS, city. | Source: okta | Pivot if positive: New device + file downloads = collection from new endpoint'
-  pq: |-
-    serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='device.lifecycle.activate'
+  pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' eventType=''device.lifecycle.activate''
+
     | let ts=(timestamp || published || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 500
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Details=device.os+' '+device.type+" device '"+event.app_name+"' added from "+request.ipChain.geographicalContext.city+', '+client.geographicalContext.country+' ip: '+request.ipChain.ip
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Details=device.os+'' ''+device.type+" device ''"+event.app_name+"'' added from "+request.ipChain.geographicalContext.city+'', ''+client.geographicalContext.country+'' ip: ''+request.ipChain.ip'
+  scope: subject
 - id: okt-07
   title: Okta Offboarding — Lifecycle Events
   notes: 'When was the account deactivated? Who ran the offboarding? What was cleared? | Source: okta | Pivot if positive: Cross-reference with Endpoint final activity timestamp'
-  pq: |-
-    serverHost='{{src_okta|okta}}'
-    | filter target contains:anycase('{{entity}}') OR actor.alternateId == '{{entity}}'
-    | filter eventType in ('user.lifecycle.deactivate','user.session.clear','user.account.update_password','group.user_membership.remove','app.user_membership.remove')
+  pq: 'serverHost=''{{src_okta|okta}}''
+
+    | filter target contains:anycase(''{{entity}}'') OR actor.alternateId == ''{{entity}}''
+
+    | filter eventType in (''user.lifecycle.deactivate'',''user.session.clear'',''user.account.update_password'',''group.user_membership.remove'',''app.user_membership.remove'')
+
     | let ts=(timestamp || published || event.time || sca:ingestTime)
+
     | sort -ts
+
     | limit 500
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Actor=actor.alternateId, Target=target.alternateId, IP=client.ipAddress
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), EventType=eventType, Actor=actor.alternateId, Target=target.alternateId, IP=client.ipAddress'
+  scope: subject
 - id: azr-01
   title: Azure Sign-In Activity — Location and App
   notes: 'What Azure/M365 apps did the user access and from where? Covers Teams, OneDrive, SharePoint. | Source: Azure | Pivot if positive: OneDrive SyncEngine = standard laptop sync. New app or new country → investigate'
-  pq: |-
-    serverHost='{{src_azure|Azure}}' UserPrincipalName='{{entity}}'
+  pq: 'serverHost=''{{src_azure|Azure}}'' UserPrincipalName=''{{entity}}''
+
     | let ts=(timestamp || createdDateTime || sca:ingestTime)
+
     | sort -ts
+
     | limit 5000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=UserPrincipalName, App=AppDisplayName, IP=IPAddress, City=LocationDetails.city, Country=LocationDetails.countryOrRegion, Status=ResultType, Device=DeviceDetail.displayName, OS=DeviceDetail.operatingSystem
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), User=UserPrincipalName, App=AppDisplayName, IP=IPAddress, City=LocationDetails.city, Country=LocationDetails.countryOrRegion, Status=ResultType, Device=DeviceDetail.displayName, OS=DeviceDetail.operatingSystem'
+  scope: subject
 - id: azr-02
   title: Azure OneDrive — Sharing and Downloads
   notes: 'Did the user share, download, or create anonymous links in OneDrive? | Source: onedrive | Pivot if positive: Anonymous link created + sensitive file = high concern. Unmanaged device download = investigate'
-  pq: |-
-    serverHost='{{src_onedrive|onedrive}}' userPrincipalName='{{entity}}'
-    | filter operation matches:anycase ('SharingSet|SharingInvitationCreated|AnonymousLinkCreated|FileDownloaded|FileSyncDownloaded|FileDeleted')
+  pq: 'serverHost=''{{src_onedrive|onedrive}}'' userPrincipalName=''{{entity}}''
+
+    | filter operation matches:anycase (''SharingSet|SharingInvitationCreated|AnonymousLinkCreated|FileDownloaded|FileSyncDownloaded|FileDeleted'')
+
     | let ts=(timestamp || createdDateTime || sca:ingestTime)
+
     | sort -ts
+
     | limit 2000
-    | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Operation=operation, File=auditData.SourceFileName, Ext=auditData.SourceFileExtension, Site=auditData.SiteUrl, IP=auditData.ClientIP, Managed=auditData.IsManagedDevice, App=auditData.ApplicationDisplayName
+
+    | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Operation=operation, File=auditData.SourceFileName, Ext=auditData.SourceFileExtension, Site=auditData.SiteUrl, IP=auditData.ClientIP, Managed=auditData.IsManagedDevice, App=auditData.ApplicationDisplayName'
+  scope: subject
 - id: sec-01
   title: 1Password Sign-ins and Item Usage
   notes: 'Did the user access secrets or sign in from unusual clients/IPs? | Source: 1password | Pivot if positive: Endpoint process/user and Okta session at same time'
-  pq: |-
-    serverHost='{{src_1password|1password}}'
-    | filter target_user.email contains:anycase('{{entity}}') OR user.email contains:anycase('{{entity}}')
+  pq: 'serverHost=''{{src_1password|1password}}''
+
+    | filter target_user.email contains:anycase(''{{entity}}'') OR user.email contains:anycase(''{{entity}}'')
+
     | sort -timestamp
+
     | limit 2000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=user.email, Target=target_user.email, Action=action, Category=category, Client=client.app_name, IP=client.ip_address, Country=location.country, Vault=vault_uuid, Item=item_uuid
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Actor=user.email, Target=target_user.email, Action=action, Category=category, Client=client.app_name, IP=client.ip_address, Country=location.country, Vault=vault_uuid, Item=item_uuid'
+  scope: subject
 - id: sec-02
   title: Secrets / Certificate Management
   notes: 'Any Sectigo/cert/secret-management changes by this user? | Source: sectigo/acm_xml | Pivot if positive: Okta, CloudTrail, GitHub token use'
-  pq: |-
-    serverHost in ('sectigo','acm_xml')
-    | filter user contains:anycase('{{username}}') OR actor.email contains:anycase('{{entity}}') OR created_by.login contains:anycase('{{username}}')
+  pq: 'serverHost in (''sectigo'',''acm_xml'')
+
+    | filter user contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR created_by.login contains:anycase(''{{username}}'')
+
     | sort -timestamp
+
     | limit 1000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, User=user, Action=event.name, Object=record, IP=ipAddress
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Source=serverHost, Actor=actor.email, User=user, Action=event.name, Object=record, IP=ipAddress'
+  scope: subject
 - id: sec-03
   title: Snyk Service Account / Token / Role Changes
   notes: 'Any Snyk token, service account, project ignore, or role change activity? | Source: snyk | Pivot if positive: GitHub repo and token activity'
-  pq: |-
-    serverHost='{{src_snyk|snyk}}'
-    | filter content.email contains:anycase('{{entity}}') OR user_id contains:anycase('{{username}}') OR content contains:anycase('{{username}}')
-    | filter event contains:anycase('service_account') OR event contains:anycase('role') OR event contains:anycase('token') OR event contains:anycase('ignore') OR event contains:anycase('integration')
+  pq: 'serverHost=''{{src_snyk|snyk}}''
+
+    | filter content.email contains:anycase(''{{entity}}'') OR user_id contains:anycase(''{{username}}'') OR content contains:anycase(''{{username}}'')
+
+    | filter event contains:anycase(''service_account'') OR event contains:anycase(''role'') OR event contains:anycase(''token'') OR event contains:anycase(''ignore'') OR event contains:anycase(''integration'')
+
     | sort -timestamp
+
     | limit 1000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Event=event, User=user_id, Org=org_id, Group=group_id, Content=content
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Event=event, User=user_id, Org=org_id, Group=group_id, Content=content'
+  scope: subject
 - id: hr-01
   title: Workday User Activity / Sign-in
   notes: 'Workday sign-ins, reads, writes, HR object access. | Source: workday/workday-location/workday_employment_logs | Pivot if positive: Departing employee context, Okta lifecycle'
-  pq: |-
-    serverHost in ('workday','workday-location','workday_employment_logs')
-    | filter userName contains:anycase('{{username}}') OR actor.email contains:anycase('{{entity}}') OR target contains:anycase('{{username}}')
+  pq: 'serverHost in (''workday'',''workday-location'',''workday_employment_logs'')
+
+    | filter userName contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'') OR target contains:anycase(''{{username}}'')
+
     | sort -timestamp
+
     | limit 2000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, User=userName, Action=activityAction, Task=taskDisplayName, Target=target, IP=ipAddress, Auth=authenticationType, SystemAccount=systemAccount
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Source=serverHost, User=userName, Action=activityAction, Task=taskDisplayName, Target=target, IP=ipAddress, Auth=authenticationType, SystemAccount=systemAccount'
+  scope: subject
 - id: hr-02
   title: JumpCloud User / Device Activity
   notes: 'JumpCloud auth, device, or directory events for user. | Source: jumpcloud | Pivot if positive: Device identity mapping and endpoint timeline'
-  pq: |-
-    serverHost='{{src_jumpcloud|jumpcloud}}'
-    | filter initiated_by.email contains:anycase('{{entity}}') OR initiated_by.username contains:anycase('{{username}}') OR useragent contains:anycase('{{username}}')
+  pq: 'serverHost=''{{src_jumpcloud|jumpcloud}}''
+
+    | filter initiated_by.email contains:anycase(''{{entity}}'') OR initiated_by.username contains:anycase(''{{username}}'') OR useragent contains:anycase(''{{username}}'')
+
     | sort -timestamp
+
     | limit 2000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Event=event_type, Service=service, Success=success, Actor=initiated_by.email, Username=initiated_by.username, IP=client_ip, Country=geoip.country_code, Host=system.hostname, UA=useragent
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Event=event_type, Service=service, Success=success, Actor=initiated_by.email, Username=initiated_by.username, IP=client_ip, Country=geoip.country_code, Host=system.hostname, UA=useragent'
+  scope: subject
 - id: hr-03
   title: Zoho / Navan / HR-adjacent SaaS
   notes: 'Travel/HR-adjacent application activity for context. | Source: navan-travel-bookings/zoho | Pivot if positive: Okta impossible travel and ZPA/ZIA IPs'
-  pq: |-
-    serverHost in ('navan-travel-bookings','zoho')
-    | filter record contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{username}}')
+  pq: 'serverHost in (''navan-travel-bookings'',''zoho'')
+
+    | filter record contains:anycase(''{{entity}}'') OR actor.email contains:anycase(''{{entity}}'') OR loggedAsUserName contains:anycase(''{{username}}'')
+
     | sort -timestamp
+
     | limit 1000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, User=loggedAsUserName, Event=event.name, Record=record, IP=ipAddress
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Source=serverHost, Actor=actor.email, User=loggedAsUserName, Event=event.name, Record=record, IP=ipAddress'
+  scope: subject
 - id: okt-06-2
   title: Okta Device Activations
   notes: 'Source: okta | Imported/generated for SOC investigation library.'
   pq: 'serverHost=''{{src_okta|okta}}'' actor.alternateId=''{{entity}}'' eventType=''device.lifecycle.activate'' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Details=device.os+'' ''+device.type+" device ''"+event.app_name+"'' added from "+request.ipChain.geographicalContext.city+'', ''+client.geographicalContext.country+'' ip: ''+request.ipChain.ip'
   merge:
     kind: append
+  scope: subject
 - id: okt-04-2
   title: Okta Failed Events
   notes: 'Source: okta | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' outcome.result='FAILURE' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Reason=outcome.reason, IP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, OS=client.userAgent.os, Browser=client.userAgent.browser
   merge:
     kind: append
+  scope: subject
 - id: okt-01-2
   title: Okta Full Raw Timeline
   notes: 'Source: okta | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Actor=actor.alternateId, EventType=eventType, Result=outcome.result, ActorIP=actor.ip, ClientIP=client.ipAddress, Country=client.geographicalContext.country, City=client.geographicalContext.city, ISP=actor.isp, OS=client.userAgent.os, Browser=client.userAgent.browser, RawUA=client.userAgent.rawUserAgent
   merge:
     kind: append
+  scope: subject
 - id: okt-05-2
   title: Okta MFA Factor Activations
   notes: 'Source: okta | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_okta|okta}}' actor.alternateId='{{entity}}' eventType='user.mfa.factor.activate' outcome.result='SUCCESS' | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Factor=target.displayName, IP=client.ipAddress, Country=client.geographicalContext.country, Reason=outcome.reason
   merge:
     kind: append
+  scope: subject
 - id: okt-07-2
   title: Okta Offboarding — Lifecycle Events
   notes: 'Source: okta | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_okta|okta}}' | filter target contains:anycase('{{entity}}') OR actor.alternateId == '{{entity}}' | filter eventType in ('user.lifecycle.deactivate','user.session.clear','user.account.update_password','group.user_membership.remove','app.user_membership.remove') | let ts=(timestamp || published || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), EventType=eventType, Actor=actor.alternateId, Target=target.alternateId, IP=client.ipAddress
   merge:
     kind: append
+  scope: subject
 - id: slk-02-2
   title: Slack Non-Corporate Device Downloads
   notes: 'Source: slack | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_slack|slack}}' actor.user.email='{{entity}}' action in ('file_downloaded','file_shared','file_uploaded','file_deleted') | filter !(context.ua contains:anycase 'Windows NT 10.0.26100') | filter !(context.ua contains:anycase 'OKTA') | filter !(context.ua contains:anycase 'GleanSearchCrawlerBot') | filter !(context.ua contains:anycase 'Scio Search') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), Action=action, File=entity.file.name, FileID=entity.file.id, IP=context.ip_address, UA=context.ua, URL=details.url_private
   merge:
     kind: append
+  scope: subject
 - id: mitre-t1098-account-manipulation
   title: Account or permission manipulation
   notes: 'Generated SOC library detection. Source: identity. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost in ('okta','salesforce_audit','atlassian-cloud-enterprise','github_org_auth') | filter actor.alternateId contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR username contains:anycase('{{username}}') | filter eventType contains:anycase('user.mfa.factor.activate','group.user_membership','app.user_membership') OR Action contains:anycase('permission','profile','role','user') OR action contains:anycase('permission','token','admin','group') | columns timestamp, serverHost, actor.alternateId, actor.email, username, eventType, Action, action, target, ipAddress | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject

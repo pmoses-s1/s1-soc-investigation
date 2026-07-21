@@ -3,117 +3,139 @@ queries:
 - id: git-03-2
   title: GitHub Token / OAuth Activity
   notes: 'Were PATs/OAuth/GitHub Apps used or modified? | Source: ghe_server_prod/github_org_auth/github_s3 | Pivot if positive: Scope by hashed_token across all GitHub events'
-  pq: |-
-    serverHost in ('ghe_server_prod','github_org_auth','github_s3')
-    | filter actor contains:anycase('{{username}}') OR actor.email contains:anycase('{{entity}}')
-    | filter action contains:anycase('token') OR action contains:anycase('oauth') OR programmatic_access_type = *
+  pq: 'serverHost in (''ghe_server_prod'',''github_org_auth'',''github_s3'')
+
+    | filter actor contains:anycase(''{{username}}'') OR actor.email contains:anycase(''{{entity}}'')
+
+    | filter action contains:anycase(''token'') OR action contains:anycase(''oauth'') OR programmatic_access_type = *
+
     | sort -timestamp
+
     | limit 2000
-    | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor, Action=action, Repo=repo, IP=actor_ip, TokenType=programmatic_access_type, Token=hashed_token, Scopes=token_scopes, UA=user_agent
+
+    | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Actor=actor, Action=action, Repo=repo, IP=actor_ip, TokenType=programmatic_access_type, Token=hashed_token, Scopes=token_scopes, UA=user_agent'
   merge:
     kind: append
+  scope: subject
 - id: sec-01-2
   title: 1Password Sign-ins and Item Usage
   notes: 'Source: 1password | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_1password|1password}}' | filter target_user.email contains:anycase('{{entity}}') OR user.email contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=user.email, Target=target_user.email, Action=action, Category=category, Client=client.app_name, IP=client.ip_address, Country=location.country, Vault=vault_uuid, Item=item_uuid
   merge:
     kind: append
+  scope: subject
 - id: edr-02-2
   title: Archive / Compression Tool Usage
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type == ''Process Creation'' | filter src.process.user contains:anycase(''{{entity}}'') OR tgt.process.user contains:anycase(''{{entity}}'') | filter src.process.name contains:anycase(''7z'') OR src.process.name contains:anycase(''rar'') OR src.process.name contains:anycase(''winzip'') OR src.process.name contains:anycase(''tar'') OR src.process.name contains:anycase(''powershell'') OR tgt.process.name contains:anycase(''7z'') OR tgt.process.name contains:anycase(''rar'') OR tgt.process.cmdline contains:anycase(''compress'') OR tgt.process.cmdline contains:anycase(''archive'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, Cmd=src.process.cmdline'
   merge:
     kind: append
+  scope: subject
 - id: atl-03-2
   title: Atlassian API Token / Admin Changes
   notes: 'Source: atlassian-cloud-enterprise | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_atlassian_cloud_enterprise|atlassian-cloud-enterprise}}' | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{entity}}') | filter action contains:anycase('token') OR action contains:anycase('admin') OR action contains:anycase('group') OR action contains:anycase('permission') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Action=action, IP=location.ip, Token=actor.tokenLabel, Changes=changedValues, Context=context
   merge:
     kind: append
+  scope: subject
 - id: azr-01-2
   title: Azure Sign-In Activity — Location and App
   notes: 'Source: Azure | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_azure|Azure}}' UserPrincipalName='{{entity}}' | let ts=(timestamp || createdDateTime || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=UserPrincipalName, App=AppDisplayName, IP=IPAddress, City=LocationDetails.city, Country=LocationDetails.countryOrRegion, Status=ResultType, Device=DeviceDetail.displayName, OS=DeviceDetail.operatingSystem
   merge:
     kind: append
+  scope: subject
 - id: sto-02-2
   title: Box Downloads / Sharing
   notes: 'Source: box | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_box|box}}' | filter created_by.login contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') | filter event_type contains:anycase('download') OR event_type contains:anycase('share') OR event_type contains:anycase('collaboration') OR event_type contains:anycase('link') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=created_by.login, Event=event_type, Item=source.name, Size=additional_details.size, IP=ip_address, Service=additional_details.service_name
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-box-search-25
   title: Box search 25
   notes: 'Source: box | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_box|box}}' message contains:anycase '{{entity}}' | columns timestamp, message | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: edr-03-2
   title: Cloud Transfer / Exfil Tooling
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type == ''Process Creation'' | filter src.process.user contains:anycase(''{{entity}}'') OR tgt.process.user contains:anycase(''{{entity}}'') | filter src.process.name contains:anycase(''rclone'') OR src.process.name contains:anycase(''aws'') OR src.process.name contains:anycase(''gsutil'') OR src.process.name contains:anycase(''curl'') OR src.process.name contains:anycase(''wget'') OR src.process.name contains:anycase(''megasync'') OR tgt.process.cmdline contains:anycase(''rclone'') OR tgt.process.cmdline contains:anycase(''aws s3'') OR tgt.process.cmdline contains:anycase(''gsutil'') OR tgt.process.cmdline contains:anycase(''createUploadSession'') OR tgt.process.cmdline contains:anycase(''dropboxapi'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, Cmd=src.process.cmdline'
   merge:
     kind: append
+  scope: subject
 - id: atl-02-2
   title: Confluence Space Exports / Jira Bulk
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('confluence-cloud','jira','atlassian-cloud-enterprise') | filter actor.email contains:anycase('{{entity}}') OR actor.name contains:anycase('{{entity}}') | filter action contains:anycase('export') OR action contains:anycase('download') OR action contains:anycase('attachment') OR event.name contains:anycase('export') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, Action=action, Object=object, IP=location.ip, Method=method
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-data-movement-search-34
   title: Data Movement search 34
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: (actor.email contains:anycase '{{entity}}' OR actor.alternateId contains:anycase '{{entity}}' OR src.process.user contains:anycase '{{entity}}' OR message contains:anycase '{{entity}}') (event.name contains:anycase ('download','upload','export','share','permission') OR eventType contains:anycase ('download','export','share') OR message contains:anycase ('download','upload','export','share','permission')) | columns timestamp, serverHost, actor.email, actor.alternateId, event.name, eventType, ipAddress, client.ipAddress, event.doc_title, tgt.file.path | sort -timestamp | nolimit
   merge:
     kind: append
+  scope: subject
 - id: imported-searches-data-movement-search-38
   title: Data Movement search 38
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '"(actor.email contains:anycase ''{{entity}}'' OR actor.alternateId contains:anycase ''{{entity}}'' OR src.process.user contains:anycase ''{{entity}}'' OR message contains:anycase ''{{entity}}'') (event.name contains:anycase (''download'',''upload'',''export'',''share'',''permission'') OR eventType contains:anycase (''download'',''export'',''share'') OR message contains:anycase (''download'',''upload'',''export'',''share'',''permission'')) | columns timestamp, serverHost, actor.email, actor.alternateId, event.name, eventType, ipAddress, client.ipAddress, event.doc_title, tgt.file.path | sort -timestamp | nolimit"|nolimit'
   merge:
     kind: append
+  scope: subject
 - id: edr-07-2
   title: Downloads / Desktop Temp — Sensitive File Staging
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type in (''File Creation'',''File Modification'') | filter src.process.user contains:anycase(''{{entity}}'') | filter tgt.file.path contains:anycase(''\\Downloads\\'') OR tgt.file.path contains:anycase(''\\Desktop\\'') OR tgt.file.path contains:anycase(''\\Temp\\'') OR tgt.file.path contains:anycase(''/Downloads/'') OR tgt.file.path contains:anycase(''/Desktop/'') | filter tgt.file.extension in:anycase (''pdf'',''docx'',''xlsx'',''pptx'',''csv'',''zip'',''7z'',''rar'',''pst'',''msg'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576, Process=src.process.name'
   merge:
     kind: append
+  scope: subject
 - id: dlp-03-2
   title: Endpoint Archive / Staging Indicators
   notes: 'Source: edr | Imported/generated for SOC investigation library.'
   pq: '| filter agent.uuid == ''{{entity}}'' OR src.process.user contains:anycase(''{{entity}}'') | filter tgt.file.path matches ''(?i).*(\.zip|\.7z|\.rar|\.tar|\.gz)$'' OR src.process.cmdline matches ''(?i).*(zip|7z|rar|tar|Compress-Archive|scp|rsync|rclone|curl|wget).*'' | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Event=event.type, Process=src.process.image.path, Cmd=src.process.cmdline, File=tgt.file.path, DstIP=dst.ip.address, DNS=dns.request'
   merge:
     kind: append
+  scope: subject
 - id: saa-02-2
   title: Figma Export / Link Changes
   notes: 'Source: figma | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_figma|figma}}' | filter actor.email contains:anycase('{{entity}}') | filter action.type contains:anycase('export') OR action.type contains:anycase('download') OR action.type contains:anycase('link') OR action.type contains:anycase('access_token') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor.email, Action=action.type, Entity=entity.type, Key=entity.key, IP=context.ip_address, Client=context.client_name
   merge:
     kind: append
+  scope: subject
 - id: git-02-2
   title: GitHub Repo Download / Clone / Zip
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('ghe_server_prod','github_s3') | filter actor contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') | filter action contains:anycase('download') OR action contains:anycase('clone') OR action contains:anycase('fetch') OR action='repo.download_zip' | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor, Action=action, Repo=repo, IP=actor_ip, UserAgent=user_agent, TokenType=programmatic_access_type
   merge:
     kind: append
+  scope: subject
 - id: git-03-2-2
   title: GitHub Token / OAuth Activity
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('ghe_server_prod','github_org_auth','github_s3') | filter actor contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') | filter action contains:anycase('token') OR action contains:anycase('oauth') OR programmatic_access_type = * | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Actor=actor, Action=action, Repo=repo, IP=actor_ip, TokenType=programmatic_access_type, Token=hashed_token, Scopes=token_scopes, UA=user_agent
   merge:
     kind: append
+  scope: subject
 - id: hr-02-2
   title: JumpCloud User / Device Activity
   notes: 'Source: jumpcloud | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_jumpcloud|jumpcloud}}' | filter initiated_by.email contains:anycase('{{entity}}') OR initiated_by.username contains:anycase('{{entity}}') OR useragent contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Event=event_type, Service=service, Success=success, Actor=initiated_by.email, Username=initiated_by.username, IP=client_ip, Country=geoip.country_code, Host=system.hostname, UA=useragent
   merge:
     kind: append
+  scope: subject
 - id: edr-04-2
   title: Large File Creation > 50MB
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type in (''File Creation'',''File Modification'') | filter tgt.file.size > 50000000 | filter src.process.user contains:anycase(''{{entity}}'') | filter tgt.file.extension in:anycase (''zip'',''7z'',''rar'',''tar'',''gz'',''tgz'',''csv'',''xlsx'',''xls'',''pdf'',''docx'',''pptx'',''json'',''sql'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576, Process=src.process.name'
   merge:
     kind: append
+  scope: subject
 - id: edr-05-2
   title: Login Events — All Endpoints
   notes: 'Source: edr | Imported/generated for SOC investigation library.'
@@ -132,78 +154,91 @@ queries:
     - LastSeen.timestamp
     array_cols:
     - LoginTypes
+  scope: subject
 - id: trv-01-2
   title: Navan Travel Bookings
   notes: 'Source: navan-travel-bookings | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_navan_travel_bookings|navan-travel-bookings}}' | filter passengers.person.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{entity}}') OR booker.email contains:anycase('{{entity}}') | let ts=(timestamp || created || lastModified || sca:ingestTime) | sort -ts | nolimit | columns Created=simpledateformat(ts,'yyyy-MM-dd'), TripName=tripName, Type=bookingType, Status=bookingStatus, Vendor=vendor, StartDate=startDate, EndDate=endDate, Purpose=purpose, Origin=origin.city, Destination=destination.city
   merge:
     kind: append
+  scope: subject
 - id: edr-06-2
   title: Print Spool Artifacts
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type in (''File Creation'',''File Modification'') | filter src.process.user contains:anycase(''{{entity}}'') | filter tgt.file.path contains:anycase(''spool'') OR tgt.file.extension in:anycase(''spl'',''shd'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, Process=src.process.name'
   merge:
     kind: append
+  scope: subject
 - id: dlp-02-2
   title: Prompt Security / AI DLP
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('prompt-security','anthropic-activity','claude-oltp') | filter actor.email_address contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR user contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email_address, User=user, Type=type, App=app_id, Detector=detector, Action=action, Verdict=event.verdict.action, File=filename, IP=actor.ip_address
   merge:
     kind: append
+  scope: subject
 - id: psc-01-2
   title: Prompt Security — All Activity
   notes: 'Source: prompt-security | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_prompt_security|prompt-security}}' log.user='{{entity}}' | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=log.user, App=log.application.name, Direction=log.direction, EventType=log.eventType, Domain=log.sensor.pageDomain, Policy=log.policyName, IP=log.ipAddress, ConvID=log.conversationId
   merge:
     kind: append
+  scope: subject
 - id: psc-02-2
   title: Prompt Security — Data Laundering / Violations
   notes: 'Source: prompt-security | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_prompt_security|prompt-security}}' log.user='{{entity}}' | let ts=(log.timestamp || log.event_time || event_time || timestamp || sca:ingestTime) | let Violations=string(log.violations) | let Secrets=string(log.violationFindingsDetails.Secrets) | filter log.eventType == 'text_action' | filter log.latency >= 1000 OR (!isempty(Violations) && Violations != '[]') OR (!isempty(Secrets) && Secrets != '[]') | sort -ts | nolimit | columns Time=simpledateformat(ts,'yyyy-MM-dd HH:mm:ss'), User=log.user, App=log.application.name, Domain=log.sensor.pageDomain, Policy=log.policyName, Secrets, Violations, Latency=log.latency, ConvID=log.conversationId, PromptID=log.promptResponseId
   merge:
     kind: append
+  scope: subject
 - id: edr-08-2
   title: Screenshot / Screen Recording Artifacts
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type == ''File Creation'' | filter src.process.user contains:anycase(''{{entity}}'') | filter tgt.file.path contains:anycase(''Screenshots'') OR tgt.file.path contains:anycase(''Screen Recordings'') OR tgt.file.path contains:anycase(''Snips'') | filter tgt.file.path matches:anycase (''\.(png|mp4|jpg)$'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, File=tgt.file.path, SizeMB=tgt.file.size/1048576'
   merge:
     kind: append
+  scope: subject
 - id: sec-02-2
   title: Secrets / Certificate Management
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('sectigo','acm_xml') | filter user contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR created_by.login contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, User=user, Action=event.name, Object=record, IP=ipAddress
   merge:
     kind: append
+  scope: subject
 - id: sec-03-2
   title: Snyk Service Account / Token / Role Changes
   notes: 'Source: snyk | Imported/generated for SOC investigation library.'
   pq: serverHost='{{src_snyk|snyk}}' | filter content.email contains:anycase('{{entity}}') OR user_id contains:anycase('{{entity}}') OR content contains:anycase('{{entity}}') | filter event contains:anycase('service_account') OR event contains:anycase('role') OR event contains:anycase('token') OR event contains:anycase('ignore') OR event contains:anycase('integration') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Event=event, User=user_id, Org=org_id, Group=group_id, Content=content
   merge:
     kind: append
+  scope: subject
 - id: edr-01-2
   title: USB / External Device Writes
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: '| filter event.type in (''File Creation'',''File Modification'') AND tgt.file.location == ''External Device'' | filter src.process.user contains:anycase(''{{entity}}'') | let ts=(timestamp || event.time || sca:ingestTime) | sort -ts | nolimit | columns Time=simpledateformat(ts,''yyyy-MM-dd HH:mm:ss''), Endpoint=endpoint.name, User=src.process.user, Process=src.process.name, File=tgt.file.path, Size=tgt.file.size, Cmd=src.process.cmdline'
   merge:
     kind: append
+  scope: subject
 - id: hr-01-2
   title: Workday User Activity / Sign-in
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('workday','workday-location','workday_employment_logs') | filter userName contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR target contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, User=userName, Action=activityAction, Task=taskDisplayName, Target=target, IP=ipAddress, Auth=authenticationType, SystemAccount=systemAccount
   merge:
     kind: append
+  scope: subject
 - id: hr-03-2
   title: Zoho / Navan / HR-adjacent SaaS
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('navan-travel-bookings','zoho') | filter record contains:anycase('{{entity}}') OR actor.email contains:anycase('{{entity}}') OR loggedAsUserName contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Actor=actor.email, User=loggedAsUserName, Event=event.name, Record=record, IP=ipAddress
   merge:
     kind: append
+  scope: subject
 - id: saa-03-2
   title: Zoom Sign-in / Admin Changes
   notes: 'Source: all | Imported/generated for SOC investigation library.'
   pq: serverHost in ('zoom','zoom_signin') | filter email contains:anycase('{{entity}}') OR operator contains:anycase('{{entity}}') | sort -timestamp | nolimit | columns Time=simpledateformat(timestamp,'yyyy-MM-dd HH:mm:ss'), Source=serverHost, Email=email, Operator=operator, Action=action, Category=category_type, IP=ip_address, Client=client_type, Detail=operation_detail
   merge:
     kind: append
+  scope: subject
 - id: dash-3-ai-genai-hunting-ai-applications-installed
   title: AI Applications Installed
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '3. AI / GenAI Hunting'.
@@ -215,10 +250,11 @@ queries:
     - tag
     max_cols:
     - LastSeen.timestamp
+  scope: environment
 - id: dash-3-ai-genai-hunting-prompt-security-violations
   title: Prompt Security Violations
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '3. AI / GenAI Hunting'.
-  pq: serverHost='{{src_prompt_security|prompt-security}}' | filter log.isValid == true | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | group violations=count(), users=estimate_distinct(log.user) by log.application.name, log.policyName | sort -violations | limit 500
+  pq: serverHost='{{src_prompt_security|prompt-security}}' | filter (log.user contains:anycase('{{entity}}')) | filter log.isValid == true | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | group violations=count(), users=estimate_distinct(log.user) by log.application.name, log.policyName | sort -violations | limit 500
   merge:
     kind: aggregate
     key_cols:
@@ -226,60 +262,70 @@ queries:
     - log.policyName
     sum_cols:
     - violations
+  scope: subject
 - id: dash-4-remote-access-vpn-p2p-remote-access-vpn-p2p-executed
   title: Remote Access / VPN / P2P Executed
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '4. Remote Access / VPN / P2P'.
-  pq: event.type in ('Process Creation','Process','Process Start') | let ts=(event.time || event_time || timestamp || ReceiveTime) | let User=(user.name || src.process.user || event.login.userName || '') | let Proc=(process.name || src.process.name || tgt.process.name || '') | let Cmd=(process.cmdline || src.process.cmdline || tgt.process.cmdline || '') | filter Proc contains:anycase('teamviewer','anydesk','rustdesk','screenconnect','connectwise','logmein','bomgar','beyondtrust','splashtop','vnc','tailscale','openvpn','wireguard','nordvpn','expressvpn','protonvpn','surfshark','utorrent','qbittorrent','transmission') OR Cmd contains:anycase('teamviewer','anydesk','rustdesk','tailscale','openvpn','wireguard','nordvpn','utorrent','qbittorrent','transmission') | columns ts.timestamp=ts, User, endpoint.name, agent.uuid, Proc, Cmd | sort -ts.timestamp | limit 3000
+  pq: event.type in ('Process Creation','Process','Process Start') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let ts=(event.time || event_time || timestamp || ReceiveTime) | let User=(user.name || src.process.user || event.login.userName || '') | let Proc=(process.name || src.process.name || tgt.process.name || '') | let Cmd=(process.cmdline || src.process.cmdline || tgt.process.cmdline || '') | filter Proc contains:anycase('teamviewer','anydesk','rustdesk','screenconnect','connectwise','logmein','bomgar','beyondtrust','splashtop','vnc','tailscale','openvpn','wireguard','nordvpn','expressvpn','protonvpn','surfshark','utorrent','qbittorrent','transmission') OR Cmd contains:anycase('teamviewer','anydesk','rustdesk','tailscale','openvpn','wireguard','nordvpn','utorrent','qbittorrent','transmission') | columns ts.timestamp=ts, User, endpoint.name, agent.uuid, Proc, Cmd | sort -ts.timestamp | limit 3000
   merge:
     kind: append
+  scope: subject
 - id: dash-6-endpoint-exfil-tooling-rclone-execution
   title: Rclone Execution
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '6. Endpoint Exfil Tooling'.
-  pq: event.type in ('Process Creation','Process Start','Process') | let Proc=(src.process.name || tgt.process.name || process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '') | filter Proc contains:anycase('rclone') OR Cmd contains:anycase(' rclone ') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''), Path=(src.process.image.path || tgt.process.image.path || '') | sort -ts.timestamp | limit 2000
+  pq: event.type in ('Process Creation','Process Start','Process') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let Proc=(src.process.name || tgt.process.name || process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '') | filter Proc contains:anycase('rclone') OR Cmd contains:anycase(' rclone ') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''), Path=(src.process.image.path || tgt.process.image.path || '') | sort -ts.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-6-endpoint-exfil-tooling-transfer-tools-scp-sftp-rsync-curl-wget
   title: Transfer Tools scp / sftp / rsync / curl / wget
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '6. Endpoint Exfil Tooling'.
-  pq: event.type in ('Process Creation','Process Start','Process') | let Proc=(src.process.name || tgt.process.name || process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '') | filter Proc contains:anycase('scp','sftp','rsync','curl','wget') OR Cmd contains:anycase(' scp ',' sftp ',' rsync ',' curl ',' wget ') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''), Path=(src.process.image.path || tgt.process.image.path || '') | sort -ts.timestamp | limit 2000
+  pq: event.type in ('Process Creation','Process Start','Process') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let Proc=(src.process.name || tgt.process.name || process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '') | filter Proc contains:anycase('scp','sftp','rsync','curl','wget') OR Cmd contains:anycase(' scp ',' sftp ',' rsync ',' curl ',' wget ') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || ''), Path=(src.process.image.path || tgt.process.image.path || '') | sort -ts.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-7-anti-forensics-history-clearing-terminal-cleanup
   title: History Clearing / Terminal Cleanup
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '7. Anti-Forensics'.
-  pq: event.type in ('Process Creation','Process') | let Cmd=(src.process.cmdline || tgt.process.cmdline || '') | filter Cmd contains:anycase('history -c','Clear-History','rm -rf ~/.bash_history','rm -rf ~/.zsh_history','del ConsoleHost_history.txt','Remove-Item ConsoleHost_history.txt') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc=(src.process.name || tgt.process.name), Cmd | sort -ts.timestamp | limit 2000
+  pq: event.type in ('Process Creation','Process') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let Cmd=(src.process.cmdline || tgt.process.cmdline || '') | filter Cmd contains:anycase('history -c','Clear-History','rm -rf ~/.bash_history','rm -rf ~/.zsh_history','del ConsoleHost_history.txt','Remove-Item ConsoleHost_history.txt') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc=(src.process.name || tgt.process.name), Cmd | sort -ts.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-7-anti-forensics-cleanup-wiping-tools
   title: Cleanup / Wiping Tools
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '7. Anti-Forensics'.
-  pq: event.type in ('Process Creation','Process') | let Proc=(src.process.name || tgt.process.name || '') | filter Proc contains:anycase('bleachbit','ccleaner','sdelete','eraser','wipe','shred','privazer','cleanmymac') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Path=(src.process.image.path || tgt.process.image.path), Cmd=(src.process.cmdline || tgt.process.cmdline) | sort -ts.timestamp | limit 2000
+  pq: event.type in ('Process Creation','Process') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let Proc=(src.process.name || tgt.process.name || '') | filter Proc contains:anycase('bleachbit','ccleaner','sdelete','eraser','wipe','shred','privazer','cleanmymac') | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Path=(src.process.image.path || tgt.process.image.path), Cmd=(src.process.cmdline || tgt.process.cmdline) | sort -ts.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-7-anti-forensics-potential-security-control-tampering
   title: Potential Security Control Tampering
   notes: Imported from dashboard 'S1 Threat Hunting and Block Candidate Dashboard - software, domains, AI, VPN, remote access, file sharing, and anti-forensics review.' tab '7. Anti-Forensics'.
-  pq: event.type in ('Behavioral Indicators','Process Creation','Process') | let Proc=(src.process.name || tgt.process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || '') | filter indicator.name in:anycase('ImpairDefense','AntiVirusEvasion','EventTampering','EtwTampering','DisablingSecurityTools','DisableSecurityTool','ModifyFirewallConfiguration') OR (Proc contains:anycase('sc.exe','reg.exe','powershell.exe') AND Cmd contains:anycase('stop','disable','Set-MpPreference','netsh advfirewall set allprofiles state off')) | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, indicator.name, indicator.description | sort -ts.timestamp | limit 2000
+  pq: event.type in ('Behavioral Indicators','Process Creation','Process') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | let Proc=(src.process.name || tgt.process.name || '') | let Cmd=(src.process.cmdline || tgt.process.cmdline || '') | filter indicator.name in:anycase('ImpairDefense','AntiVirusEvasion','EventTampering','EtwTampering','DisablingSecurityTools','DisableSecurityTool','ModifyFirewallConfiguration') OR (Proc contains:anycase('sc.exe','reg.exe','powershell.exe') AND Cmd contains:anycase('stop','disable','Set-MpPreference','netsh advfirewall set allprofiles state off')) | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, indicator.name, indicator.description | sort -ts.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-5-prompt-security-ai-prompt-violations-drilldown
   title: Prompt Violations Drilldown
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '5. Prompt Security / AI'.
-  pq: serverHost='{{src_prompt_security|prompt-security}}' | filter log.isValid == true | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | columns ts.timestamp=ts, log.user, log.userGroups, log.application.name, log.sensor.pageDomain, log.sensor.pageUrl, log.ipAddress, log.country, log.policyName, log.violations, log.violationFindingsDetails.Secrets, log.violationFindingsDetails.Sensitive_Data, log.violationFindingsDetails.Harmful_Content_Moderator, log.conversationId, log.promptResponseId, severity | sort -ts.timestamp | limit 5000
+  pq: serverHost='{{src_prompt_security|prompt-security}}' | filter (log.user contains:anycase('{{entity}}')) | filter log.isValid == true | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | columns ts.timestamp=ts, log.user, log.userGroups, log.application.name, log.sensor.pageDomain, log.sensor.pageUrl, log.ipAddress, log.country, log.policyName, log.violations, log.violationFindingsDetails.Secrets, log.violationFindingsDetails.Sensitive_Data, log.violationFindingsDetails.Harmful_Content_Moderator, log.conversationId, log.promptResponseId, severity | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-6-icloud-apple-sync-icloud-processes-sync-daemons
   title: iCloud Processes / Sync Daemons
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '6. iCloud / Apple Sync'.
-  pq: event.category='process' | filter src.process.name in ('bird','cloudd','cloudphotod','nsurlsessiond','sharingd') OR src.process.name contains:anycase('icloud','CloudDocs') OR src.process.cmdline contains:anycase('icloud','CloudDocs') | columns ts.timestamp=event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, src.process.image.path, src.process.cmdline, src.process.parent.name, src.process.storyline.id | sort -ts.timestamp | limit 3000
+  pq: event.category='process' | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter src.process.name in ('bird','cloudd','cloudphotod','nsurlsessiond','sharingd') OR src.process.name contains:anycase('icloud','CloudDocs') OR src.process.cmdline contains:anycase('icloud','CloudDocs') | columns ts.timestamp=event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, src.process.image.path, src.process.cmdline, src.process.parent.name, src.process.storyline.id | sort -ts.timestamp | limit 3000
   merge:
     kind: append
+  scope: subject
 - id: dash-7-usb-endpoint-staging-usb-external-device-writes-refined
   title: USB / External Device Writes - Refined
   notes: Imported from dashboard 'S1 DLP and Exfiltration Dashboard - ZIA egress, SaaS exports, Prompt Security, iCloud, USB, staging, and correlation timelines.' tab '7. USB / Endpoint Staging'.
-  pq: event.type in ('File Creation','File Modification') | filter tgt.file.location == 'External Device' OR tgt.file.path contains:anycase('/Volumes/') | filter !(tgt.file.path contains:anycase('/var/lib/kubelet/')) AND !(tgt.file.path contains:anycase('/pods/')) AND !(tgt.file.path contains:anycase('/projected/')) AND !(src.process.name contains:anycase('kubelet')) | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, Size=tgt.file.size, Proc=(src.process.name || process.name || src.process.image.path), Cmd=src.process.cmdline | sort -ts.timestamp | limit 5000
+  pq: event.type in ('File Creation','File Modification') | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter tgt.file.location == 'External Device' OR tgt.file.path contains:anycase('/Volumes/') | filter !(tgt.file.path contains:anycase('/var/lib/kubelet/')) AND !(tgt.file.path contains:anycase('/pods/')) AND !(tgt.file.path contains:anycase('/projected/')) AND !(src.process.name contains:anycase('kubelet')) | columns ts.timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, Size=tgt.file.size, Proc=(src.process.name || process.name || src.process.image.path), Cmd=src.process.cmdline | sort -ts.timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: dash-1-executive-summary-high-risk-software-installed
   title: High-Risk Software Installed
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '1. Executive Summary'.
@@ -288,6 +334,7 @@ queries:
     kind: aggregate
     key_cols:
     - Source
+  scope: environment
 - id: dash-1-executive-summary-prompt-security-violations
   title: Prompt Security Violations
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '1. Executive Summary'.
@@ -296,12 +343,14 @@ queries:
     kind: aggregate
     key_cols:
     - Source
+  scope: environment
 - id: dash-2-oplockdown-software-risk-high-risk-software-by-user-endpoint
   title: High-Risk Software by User / Endpoint
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '2. OpLockdown Software Risk'.
-  pq: serverHost='{{src_oplockdown|oplockdown}}' | filter tag in ('VPN','RemoteManagement','Filesharing','Peer-To-Peer','AI-IDE','AI-MISUSE','Games') | columns timestamp, owner, endpoint.name, app_name, tag, severity, LastSeen.timestamp=lastseen | sort -LastSeen.timestamp | limit 2000
+  pq: serverHost='{{src_oplockdown|oplockdown}}' | filter (owner contains:anycase('{{entity}}')) | filter tag in ('VPN','RemoteManagement','Filesharing','Peer-To-Peer','AI-IDE','AI-MISUSE','Games') | columns timestamp, owner, endpoint.name, app_name, tag, severity, LastSeen.timestamp=lastseen | sort -LastSeen.timestamp | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-2-oplockdown-software-risk-recently-observed-high-risk-software
   title: Recently Observed High-Risk Software
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '2. OpLockdown Software Risk'.
@@ -317,117 +366,137 @@ queries:
     max_cols:
     - LastRecord.timestamp
     - AppLastSeen.timestamp
+  scope: environment
 - id: dash-3-edr-staging-tooling-remote-access-vpn-p2p-games-execution
   title: Remote Access / VPN / P2P / Games Execution
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '3. EDR Staging & Tooling'.
-  pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') OR dataSource.category == ''process'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''teamviewer'',''anydesk'',''vnc'',''screenconnect'',''connectwise'',''logmein'',''bomgar'',''beyondtrust'',''splashtop'',''rustdesk'',''ngrok'',''tailscale'',''wireguard'',''openvpn'',''nordvpn'',''protonvpn'',''utorrent'',''qbittorrent'',''transmission'',''steam'',''epic'',''battle.net'') OR Cmd contains:anycase(''teamviewer'',''anydesk'',''rustdesk'',''tailscale'',''wireguard'',''openvpn'',''ngrok'',''utorrent'',''qbittorrent'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || '''') | sort -timestamp | limit 2000'
+  pq: '| filter ((agent.uuid == ''{{agent_uuid}}'' OR endpoint.name contains:anycase(''{{hostname}}'') OR src.process.user contains:anycase(''{{username}}''))) | filter event.type in (''Process Creation'',''Process Start'',''Process'') OR dataSource.category == ''process'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''teamviewer'',''anydesk'',''vnc'',''screenconnect'',''connectwise'',''logmein'',''bomgar'',''beyondtrust'',''splashtop'',''rustdesk'',''ngrok'',''tailscale'',''wireguard'',''openvpn'',''nordvpn'',''protonvpn'',''utorrent'',''qbittorrent'',''transmission'',''steam'',''epic'',''battle.net'') OR Cmd contains:anycase(''teamviewer'',''anydesk'',''rustdesk'',''tailscale'',''wireguard'',''openvpn'',''ngrok'',''utorrent'',''qbittorrent'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), Proc, Cmd, Parent=(src.process.parent.name || '''') | sort -timestamp | limit 2000'
   merge:
     kind: append
+  scope: subject
 - id: dash-3-edr-staging-tooling-usb-external-device-writes
   title: USB / External Device Writes
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '3. EDR Staging & Tooling'.
-  pq: '| filter event.type in (''File Creation'',''File Modification'') | filter tgt.file.location == ''External Device'' OR tgt.file.path contains:anycase(''/Volumes/'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, Size=tgt.file.size, Proc=(src.process.name || process.name || ''''), Cmd=(src.process.cmdline || process.cmdline || '''') | sort -timestamp | limit 2000'
+  pq: '| filter ((agent.uuid == ''{{agent_uuid}}'' OR endpoint.name contains:anycase(''{{hostname}}'') OR src.process.user contains:anycase(''{{username}}''))) | filter event.type in (''File Creation'',''File Modification'') | filter tgt.file.location == ''External Device'' OR tgt.file.path contains:anycase(''/Volumes/'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=(src.process.user || user.name), File=tgt.file.path, Ext=tgt.file.extension, Size=tgt.file.size, Proc=(src.process.name || process.name || ''''), Cmd=(src.process.cmdline || process.cmdline || '''') | sort -timestamp | limit 2000'
   merge:
     kind: append
+  scope: subject
 - id: dash-5-icloud-apple-sync-icloud-processes-sync-daemons
   title: iCloud Processes / Sync Daemons
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '5. iCloud / Apple Sync'.
-  pq: event.category='process' | filter src.process.name in ('bird','cloudd','cloudphotod','nsurlsessiond','sharingd') OR src.process.name contains:anycase('icloud') OR src.process.cmdline contains:anycase('CloudDocs','icloud') | columns event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, src.process.image.path, src.process.cmdline, src.process.parent.name, src.process.storyline.id | sort -event.time | limit 2000
+  pq: event.category='process' | filter ((agent.uuid == '{{agent_uuid}}' OR endpoint.name contains:anycase('{{hostname}}') OR src.process.user contains:anycase('{{username}}'))) | filter src.process.name in ('bird','cloudd','cloudphotod','nsurlsessiond','sharingd') OR src.process.name contains:anycase('icloud') OR src.process.cmdline contains:anycase('CloudDocs','icloud') | columns event.time, endpoint.name, agent.uuid, src.process.user, src.process.name, src.process.image.path, src.process.cmdline, src.process.parent.name, src.process.storyline.id | sort -event.time | limit 2000
   merge:
     kind: append
+  scope: subject
 - id: dash-5-icloud-apple-sync-icloud-dns-network
   title: iCloud DNS / Network
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '5. iCloud / Apple Sync'.
   pq: '| union ( event.category=''dns'' | filter event.dns.request contains:anycase(''icloud'',''icloud-content'',''apple'',''mzstatic'',''cdn-apple'',''ckdatabase'') | columns event.time, endpoint.name, src.process.user, src.process.name, Signal=''DNS'', Object=event.dns.request, Detail=event.dns.response ), ( event.category=''ip'' | filter src.process.name in (''bird'',''cloudd'',''cloudphotod'',''nsurlsessiond'',''sharingd'') | columns event.time, endpoint.name, src.process.user, src.process.name, Signal=''IP Connect'', Object=dst.ip.address, Detail=(dst.as.organization || dst.geo.country) ) | sort -event.time | limit 2000'
   merge:
     kind: append
+  scope: subject
 - id: dash-6-ai-prompt-security-prompt-violations-drilldown
   title: Prompt Violations Drilldown
   notes: Imported from dashboard 'Unified Insider Risk / DLP investigation dashboard combining OpLockdown software inventory, SentinelOne EDR behavior, ZIA egress, iCloud sync, Prompt Security AI activity, Google Workspace, Salesforce, and quick correlation views. Use dashboard-level filters where available; for sources with different identity fields, use the normalized User columns in tables for ad hoc filtering/drilldown.' tab '6. AI / Prompt Security'.
-  pq: serverHost == 'prompt-security' | filter log.isValid == true | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | columns ts, log.user, log.userGroups, log.application.name, log.sensor.pageDomain, log.sensor.pageUrl, log.ipAddress, log.country, log.policyName, log.violations, log.violationFindingsDetails.Secrets, log.violationFindingsDetails.Sensitive_Data, log.violationFindingsDetails.Harmful_Content_Moderator, log.conversationId, log.promptResponseId, severity | sort -ts | limit 3000
+  pq: serverHost == 'prompt-security' | filter (log.user contains:anycase('{{entity}}')) | filter log.isValid == true | let ts=(log.timestamp || log.event_time || event_time || timestamp || ReceiveTime) | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | columns ts, log.user, log.userGroups, log.application.name, log.sensor.pageDomain, log.sensor.pageUrl, log.ipAddress, log.country, log.policyName, log.violations, log.violationFindingsDetails.Secrets, log.violationFindingsDetails.Sensitive_Data, log.violationFindingsDetails.Harmful_Content_Moderator, log.conversationId, log.promptResponseId, severity | sort -ts | limit 3000
   merge:
     kind: append
+  scope: subject
 - id: itm-collection-local-archives
   title: Local archive or export staging
   notes: 'Generated SOC library detection. Source: edr. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: '| filter event.type in (''File Creation'',''File Modification'') | filter src.process.user contains:anycase(''{{username}}'') | filter tgt.file.extension in:anycase(''zip'',''7z'',''rar'',''tar'',''gz'',''tgz'',''pst'',''mbox'',''csv'',''xlsx'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, File=tgt.file.path, Size=tgt.file.size, Proc=src.process.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: itm-exfil-usb
   title: USB file writes
   notes: 'Generated SOC library detection. Source: edr. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: '| filter event.type in (''File Creation'',''File Modification'') AND tgt.file.location == ''External Device'' | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, File=tgt.file.path, Size=tgt.file.size, Proc=src.process.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: itm-exfil-transfer-tools
   title: Transfer tool execution
   notes: 'Generated SOC library detection. Source: edr. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | let Proc=(src.process.name || tgt.process.name || process.name || '''') | filter Proc contains:anycase(''rclone'',''scp'',''sftp'',''rsync'',''curl'',''wget'',''aws'',''gsutil'') OR Cmd contains:anycase('' rclone '','' scp '','' sftp '','' rsync '','' curl '','' wget '','' aws s3 '','' gsutil '') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: itm-obfuscation-cleanup
   title: Cleanup or history clearing
   notes: 'Generated SOC library detection. Source: edr. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: '| filter event.type in (''Process Creation'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Cmd=(src.process.cmdline || tgt.process.cmdline || '''') | filter Cmd contains:anycase(''history -c'',''Clear-History'',''Remove-Item ConsoleHost_history.txt'',''rm -rf ~/.bash_history'',''sdelete'',''shred'',''bleachbit'',''ccleaner'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc=src.process.name, Cmd | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: itm-evasion-security-tamper
   title: Security control tampering
   notes: 'Generated SOC library detection. Source: edr. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: '| filter event.type in (''Behavioral Indicators'',''Process Creation'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Cmd=(src.process.cmdline || tgt.process.cmdline || '''') | filter indicator.name in:anycase(''ImpairDefense'',''DisablingSecurityTools'',''EventTampering'',''EtwTampering'') OR Cmd contains:anycase(''Set-MpPreference'',''DisableRealtimeMonitoring'',''netsh advfirewall set allprofiles state off'',''sc stop'',''sc config'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, indicator.name, Proc=src.process.name, Cmd | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: itm-credential-access-password-manager
   title: Password manager activity
   notes: 'Generated SOC library detection. Source: 1password. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost='{{src_1password|1password}}' | filter target_user.email contains:anycase('{{entity}}') OR user.email contains:anycase('{{entity}}') | columns timestamp, user.email, target_user.email, action, category, client.app_name, client.ip_address, location.country, vault_uuid, item_uuid | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: itm-ai-sensitive-prompt
   title: AI prompt sensitive data violations
   notes: 'Generated SOC library detection. Source: prompt-security. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: serverHost='{{src_prompt_security|prompt-security}}' log.user='{{entity}}' | filter log.violations = * OR log.violationFindingsDetails.Secrets = * OR log.violationFindingsDetails.Sensitive_Data = * OR log.violationFindingsDetails.Harmful_Content_Moderator = * | columns timestamp, log.user, log.application.name, log.policyName, log.violations, log.violationFindingsDetails.Secrets, log.violationFindingsDetails.Sensitive_Data, log.conversationId | sort -timestamp | limit 5000
   merge:
     kind: append
+  scope: subject
 - id: mitre-t1027-obfuscated-files
   title: Obfuscated or compressed file staging
   notes: 'Generated SOC library detection. Source: edr. Designed for investigation execution engine and mapped to insider-risk/MITRE-style behavior.'
   pq: '| filter event.type in (''File Creation'',''File Modification'',''Process Creation'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | filter tgt.file.extension in:anycase(''zip'',''7z'',''rar'',''gz'',''tgz'',''enc'',''gpg'') OR src.process.cmdline contains:anycase(''Compress-Archive'',''base64'',''openssl enc'',''gpg -c'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, event.type, File=tgt.file.path, Proc=src.process.name, Cmd=src.process.cmdline | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: egen-archive-tools-execution
   title: Endpoint Execution — Archive Tools
   notes: Generated endpoint process hunt for archive_tools.
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''7z'',''rar'',''winzip'',''tar'',''gzip'',''zip'') OR Cmd contains:anycase(''7z'',''rar'',''winzip'',''tar'',''gzip'',''zip'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd, Parent=src.process.parent.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: egen-transfer-tools-execution
   title: Endpoint Execution — Transfer Tools
   notes: Generated endpoint process hunt for transfer_tools.
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''rclone'',''scp'',''sftp'',''rsync'',''curl'',''wget'',''aws'',''gsutil'') OR Cmd contains:anycase(''rclone'',''scp'',''sftp'',''rsync'',''curl'',''wget'',''aws'',''gsutil'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd, Parent=src.process.parent.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: egen-remote-access-execution
   title: Endpoint Execution — Remote Access
   notes: Generated endpoint process hunt for remote_access.
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''teamviewer'',''anydesk'',''rustdesk'',''screenconnect'',''connectwise'',''logmein'',''vnc'',''splashtop'') OR Cmd contains:anycase(''teamviewer'',''anydesk'',''rustdesk'',''screenconnect'',''connectwise'',''logmein'',''vnc'',''splashtop'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd, Parent=src.process.parent.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: egen-vpn-tools-execution
   title: Endpoint Execution — Vpn Tools
   notes: Generated endpoint process hunt for vpn_tools.
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''tailscale'',''openvpn'',''wireguard'',''nordvpn'',''protonvpn'',''expressvpn'') OR Cmd contains:anycase(''tailscale'',''openvpn'',''wireguard'',''nordvpn'',''protonvpn'',''expressvpn'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd, Parent=src.process.parent.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: egen-cleanup-tools-execution
   title: Endpoint Execution — Cleanup Tools
   notes: Generated endpoint process hunt for cleanup_tools.
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''sdelete'',''bleachbit'',''ccleaner'',''shred'',''eraser'',''privazer'') OR Cmd contains:anycase(''sdelete'',''bleachbit'',''ccleaner'',''shred'',''eraser'',''privazer'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd, Parent=src.process.parent.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
 - id: egen-ai-desktop-tools-execution
   title: Endpoint Execution — Ai Desktop Tools
   notes: Generated endpoint process hunt for ai_desktop_tools.
   pq: '| filter event.type in (''Process Creation'',''Process Start'',''Process'') | filter src.process.user contains:anycase(''{{username}}'') OR agent.uuid == ''{{agent_uuid}}'' | let Proc=(src.process.name || tgt.process.name || process.name || '''') | let Cmd=(src.process.cmdline || tgt.process.cmdline || process.cmdline || '''') | filter Proc contains:anycase(''cursor'',''windsurf'',''claude'',''chatgpt'',''copilot'',''codeium'') OR Cmd contains:anycase(''cursor'',''windsurf'',''claude'',''chatgpt'',''copilot'',''codeium'') | columns timestamp=(event.time || timestamp), endpoint.name, agent.uuid, User=src.process.user, Proc, Cmd, Parent=src.process.parent.name | sort -timestamp | limit 5000'
   merge:
     kind: append
+  scope: subject
