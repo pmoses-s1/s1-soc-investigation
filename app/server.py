@@ -354,14 +354,6 @@ def start_run(d: dict) -> dict:
             else:
                 reg["status"] = "complete" if v.passed else "incomplete"
             reg["final_coverage"] = result.get("coverage")
-            try:
-                (run_dir / "verification.json").write_text(json.dumps(v.to_dict()))
-                (run_dir / "run_status.json").write_text(json.dumps({
-                    "status": reg["status"], "stats": result["stats"],
-                    "cache": result.get("cache"), "coverage": result.get("coverage"),
-                    "workbook": reg["workbook"], "entity": entity, "catalog": catalog.name}))
-            except Exception:
-                pass
             activity.log({"event": "verification", "passed": v.passed,
                           "passed_queries": v.passed_queries,
                           "total_queries": v.total_queries})
@@ -373,6 +365,14 @@ def start_run(d: dict) -> dict:
             except Exception:
                 pass
         finally:
+            # Always persist a terminal status + verification, even if the run
+            # raised or was interrupted, so reopening never shows "unknown". If the
+            # whole process is killed before this runs, the reopen path recomputes
+            # the verdict from the ledger DB on disk (see _recompute_from_ledger).
+            try:
+                _persist_status(run_dir, reg, entity, catalog.name)
+            except Exception:
+                pass
             try:
                 ledger.close()
             except Exception:
@@ -596,6 +596,62 @@ def test_connection(d: dict) -> dict:
         return {"ok": False, "error": str(e)[:200], "console": config.console_url}
 
 
+_TERMINAL_STATUSES = ("complete", "incomplete", "failed", "error", "cancelled")
+
+
+def _persist_status(run_dir: Path, reg: dict, entity: str, catalog_name: str) -> None:
+    """Write a terminal run_status.json (+ verification.json). Called from the run
+    worker's `finally` so a crashed or interrupted run never reopens as 'unknown'."""
+    v = reg.get("verification")
+    if v is not None:
+        try:
+            (run_dir / "verification.json").write_text(json.dumps(v))
+        except Exception:
+            pass
+    status = reg.get("status") or "incomplete"
+    if status == "running":  # worker exited without setting a terminal status
+        status = "incomplete"
+    (run_dir / "run_status.json").write_text(json.dumps({
+        "status": status, "stats": reg.get("stats"), "cache": reg.get("cache"),
+        "coverage": reg.get("final_coverage"), "workbook": reg.get("workbook"),
+        "error": reg.get("error"), "entity": entity, "catalog": catalog_name}))
+
+
+def _recompute_from_ledger(run_dir: Path, meta: dict):
+    """Recompute a run's verdict from the ledger DB on disk, for a run that is not
+    live in memory and has no terminal status written (e.g. the process was killed
+    mid-run). Returns (status, verification_dict) or (None, None) if it can't.
+
+    The ledger persists every slice state, so a real pass/incomplete/failed verdict
+    is recoverable even when the run never got to write run_status.json. This is
+    what turns 'unknown' into an accurate, resumable status after a restart."""
+    db = run_dir / "ledger.db"
+    if not db.is_file():
+        return None, None
+    cat_path = _resolve_catalog_path(meta.get("catalog") or "")
+    if not cat_path or not Path(cat_path).is_file():
+        return None, None
+    ledger = None
+    try:
+        cat = load_catalog(cat_path)
+        ledger = Ledger(db)
+        rid = meta.get("run_id") or run_dir.name
+        v = verify_run(ledger, rid, cat)
+        vd = v.to_dict()
+        # A run with any pending/in-flight slice was interrupted; otherwise the
+        # verdict is authoritative (pass = complete, else incomplete/failed).
+        status = "complete" if v.passed else "incomplete"
+        return status, vd
+    except Exception:
+        return None, None
+    finally:
+        if ledger is not None:
+            try:
+                ledger.close()
+            except Exception:
+                pass
+
+
 def list_history(limit: int = 50) -> list:
     """Scan the output folder for past runs (survives restarts).
 
@@ -623,6 +679,13 @@ def list_history(limit: int = 50) -> list:
                     status = json.loads((rd / "run_status.json").read_text()).get("status", "unknown")
                 except Exception:
                     pass
+            # No live run and no terminal status on disk (process killed mid-run, or
+            # an older run): recover a real verdict from the ledger instead of
+            # showing 'unknown'.
+            if status in (None, "", "unknown", "running") and not live:
+                rec_status, _ = _recompute_from_ledger(rd, m)
+                if rec_status:
+                    status = rec_status
             runs.append({"run_id": rid, "case": m.get("case"), "entity": m.get("entity"),
                          "catalog": m.get("catalog_name") or m.get("catalog"), "status": status,
                          "started_at": m.get("started_at"), "run_dir": str(rd)})
@@ -909,6 +972,20 @@ class H(BaseHTTPRequestHandler):
                     st = json.loads((run_dir / "run_status.json").read_text())
                 except Exception:
                     st = {}
+            # Interrupted run (killed before writing a terminal status): recover the
+            # verdict + verification from the ledger so the UI shows an accurate,
+            # resumable status instead of 'unknown'.
+            if st.get("status", "unknown") in (None, "", "unknown", "running") and (run_dir / "run_meta.json").is_file():
+                try:
+                    meta = json.loads((run_dir / "run_meta.json").read_text())
+                    rec_status, rec_ver = _recompute_from_ledger(run_dir, meta)
+                    if rec_status:
+                        st.setdefault("status", rec_status)
+                        st["status"] = rec_status
+                    if rec_ver and not ver:
+                        ver = rec_ver
+                except Exception:
+                    pass
             return self._send(200, {"status": st.get("status", "unknown"), "stats": st.get("stats"),
                                     "cache": st.get("cache"), "verification": ver,
                                     "coverage": st.get("coverage"), "workbook": st.get("workbook"),

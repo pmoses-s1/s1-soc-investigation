@@ -23,6 +23,7 @@ MODULES = [
     "tests.test_engine_e2e",
     "tests.test_catalog_defaults",
     "tests.test_catalog_lint",
+    "tests.test_scope_and_timeout",
 ]
 
 

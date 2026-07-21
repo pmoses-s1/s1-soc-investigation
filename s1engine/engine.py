@@ -36,7 +36,8 @@ from .config import EngineConfig
 from .ledger import (Job, Ledger, STATE_DONE, STATE_FAILED, STATE_PERMANENT,
                      job_id as make_job_id)
 from .lrq_client import (LRQClient, QuerySyntaxError, RateLimitError,
-                         ServerError, LRQError, RequestsTransport, Transport)
+                         ServerError, SliceTimeout, LRQError, RequestsTransport,
+                         Transport)
 from .merge import merge_query_results
 from .rate_limiter import AIMDController, TokenBucket
 from .slicing import Slice, day_slices, iso_z, slices_for_lookback, subdivide
@@ -150,6 +151,16 @@ class InvestigationEngine:
         self._rr_lock = threading.Lock()
         # Cooperative cancel: set from another thread to stop launching new slices.
         self._cancel = threading.Event()
+        # Circuit-breaker + source-precheck state. run() resets these per run; they
+        # are initialised here too so helpers (e.g. _handle_transient) are usable
+        # standalone in tests and never hit an AttributeError.
+        self._broken: Dict[str, str] = {}
+        self._broken_lock = threading.Lock()
+        self._src_exist: Dict[tuple, bool] = {}
+        self._src_inflight: Dict[tuple, threading.Event] = {}
+        self._warned_mismatch: set = set()
+        self._empty_emitted: set = set()
+        self._src_lock = threading.Lock()
 
     def request_cancel(self) -> None:
         """Signal a cooperative stop. In-flight slices finish; no new ones start.
@@ -204,6 +215,17 @@ class InvestigationEngine:
                 # It creates no jobs and is reported as skipped, not failed.
                 skipped.append({"query": q.id, "missing": missing})
                 self._emit({"event": "query_skipped", "query": q.id, "missing": missing})
+                continue
+            # Scope gate: a subject/pivot query must be filtered to the subject (or
+            # pivot value) before it runs, so a single-subject investigation never
+            # silently pulls the whole tenant. environment/coverage run fleet-wide.
+            gate = q.scope_gate(variables)
+            if gate is not None:
+                skipped.append({"query": q.id, "missing": gate["needs"],
+                                "reason": gate["reason"], "scope": gate["scope"]})
+                self._emit({"event": "query_skipped", "query": q.id,
+                            "missing": gate["needs"], "reason": gate["reason"],
+                            "scope": gate["scope"]})
                 continue
             runnable += 1
             pq_rendered = _apply_source_field(q.render(variables), params.source_field)
@@ -422,6 +444,12 @@ class InvestigationEngine:
                         self._emit({"event": "query_aborted", "query": job.query_id,
                                     "error": str(e)[:200]})
                 return
+            except SliceTimeout as e:
+                # A wall timeout is deterministic for this window size: retrying the
+                # same slice at the same granularity times out again. Subdivide
+                # immediately instead of burning the retry budget on identical tries.
+                self._handle_transient(job, ledger, params, stats, enqueue,
+                                       attempts, str(e), timeout=True)
             except ServerError as e:
                 self._handle_transient(job, ledger, params, stats, enqueue,
                                        attempts, str(e))
@@ -500,8 +528,12 @@ class InvestigationEngine:
 
     def _handle_transient(self, job: Job, ledger: Ledger, params: RunParams,
                           stats: Dict[str, int], enqueue: Callable[[Job], None],
-                          attempts: int, err: str) -> None:
-        if attempts < params.max_attempts:
+                          attempts: int, err: str, timeout: bool = False) -> None:
+        # A wall timeout is not a transient blip: the same slice at the same
+        # granularity will time out again, so skip the same-size retry loop and
+        # subdivide straight away (a smaller window is the actual remedy). Genuine
+        # transient errors (5xx, dropped connection) still retry with backoff first.
+        if not timeout and attempts < params.max_attempts:
             stats["retries"] += 1
             ledger.mark_pending(job.job_id, error=err[:500])
             self._emit({"event": "retry", "query": job.query_id, "slice": job.slice_key,
@@ -509,7 +541,7 @@ class InvestigationEngine:
             time.sleep(min(2 ** attempts, 15))
             enqueue(ledger.get_job(job.job_id))
             return
-        # Retries exhausted. Try one round of subdivision for slow slices.
+        # Retries exhausted (or a wall timeout): subdivide the slow slice.
         if params.subdivide_on_timeout:
             children = self._subdivide_job(job, ledger)
             if children:
@@ -518,23 +550,35 @@ class InvestigationEngine:
                 for c in children:
                     enqueue(c)
                 self._emit({"event": "subdivided", "query": job.query_id,
-                                  "slice": job.slice_key, "children": len(children)})
+                                  "slice": job.slice_key, "children": len(children),
+                                  "reason": "timeout" if timeout else "retries_exhausted"})
                 return
         ledger.mark_failed(job.job_id, error=err[:500])
         stats["failed"] += 1
         self._emit({"event": "slice_failed", "query": job.query_id,
                           "slice": job.slice_key, "error": err[:200]})
-        # Retries AND subdivision are both exhausted and the slice still failed.
-        # A transient blip would have recovered by now, so this is a deterministic
-        # query error (e.g. a 500 from a malformed query). Trip the circuit breaker
-        # so the query's remaining slices are skipped, and flag that it needs a fix.
+        # Subdivision is exhausted and the slice still failed. If it timed out even
+        # at the floor granularity, the query is too heavy for one small window
+        # (usually an unscoped/full-text scan); tell the analyst to scope it to a
+        # subject or shorten the lookback rather than silently dropping it. Any
+        # other post-retry failure is treated as a deterministic query error.
+        if timeout:
+            hint = ("slice still exceeded the wall timeout at the smallest window; "
+                    "scope this query to a subject or reduce the lookback")
+            self._emit({"event": "slice_failed", "query": job.query_id,
+                        "slice": job.slice_key, "error": hint})
+        # Trip the circuit breaker so the query's remaining slices are skipped and
+        # it is flagged as needing a fix, instead of re-failing every day.
         if params.abort_query_on_permanent:
             with self._broken_lock:
                 first = job.query_id not in self._broken
-                self._broken[job.query_id] = err[:200]
+                self._broken[job.query_id] = (err[:200] if not timeout
+                                              else "wall timeout at floor granularity")
             if first:
                 self._emit({"event": "query_needs_fix", "query": job.query_id,
-                            "error": err[:200]})
+                            "error": (err[:200] if not timeout else
+                                      "too heavy: times out even at the smallest window; "
+                                      "scope to a subject or shorten lookback")})
 
     def _subdivide_job(self, job: Job, ledger: Ledger) -> List[Job]:
         sl = Slice(datetime.fromisoformat(job.slice_start.replace("Z", "+00:00")),

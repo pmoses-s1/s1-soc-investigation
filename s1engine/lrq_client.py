@@ -45,7 +45,15 @@ class RateLimitError(LRQError):
 
 
 class ServerError(LRQError):
-    """5xx or client-side timeout. Transient; retry then subdivide."""
+    """5xx or client-side transport error. Transient; retry then subdivide."""
+
+
+class SliceTimeout(ServerError):
+    """The slice exceeded its wall-clock budget before completing. This is
+    deterministic for a given (query, window) size, so retrying the SAME slice at
+    the SAME granularity just times out again. The engine subdivides immediately
+    instead of burning its retry budget on identical attempts. Subclasses
+    ServerError so any existing `except ServerError` still catches it."""
 
 
 class QuerySyntaxError(LRQError):
@@ -220,7 +228,7 @@ class LRQClient:
         try:
             while True:
                 if time.monotonic() - t0 > self.query_timeout_s:
-                    raise ServerError(f"slice exceeded {self.query_timeout_s}s wall timeout")
+                    raise SliceTimeout(f"slice exceeded {self.query_timeout_s}s wall timeout")
                 resp = self.poll(qid, tag, last_seen)
                 polls += 1
                 steps_total = int(resp.get("stepsTotal") or 0)
