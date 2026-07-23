@@ -1,15 +1,16 @@
 # s1-soc-investigation
 
-> **Disclaimer.** Community-supported tool, not an official SentinelOne product and not covered by
+> **Disclaimer.** Community-supported tool, not an official SentinelOne product, and not covered by
 > SentinelOne support. Review what it runs and test against a non-production tenant first.
+> It uses no AI or LLM and needs no bring-your-own-AI. It's a read-only tool.
 
 An execution engine and query library for long (90+ day) DFIR and insider-threat investigations over the
 SentinelOne Singularity Data Lake, without the timeouts, rate limits, and silently-skipped queries that
 break notebook automation. It ships ~1,300 curated DFIR queries across identity, endpoint, web/DLP,
 SaaS, AI, cloud, and cross-source correlation, and runs them slice by slice as a local, hardened Docker
-web app: pick a catalog, an entity, and a lookback, hit Start, and get a findings-first verification
+web app: pick a catalogue, an entity, and a lookback, hit Start, and get a findings-first verification
 report that proves every query ran, plus a workbook and downloadable logs. It is self-healing along the
-way, skipping days a source has no data, aborting broken queries instead of re-failing them, and letting
+way, skipping days when a source has no data, aborting broken queries instead of re-failing them, and letting
 you fix a query and re-run from the results panel.
 
 ## Install and run (Docker, one command)
