@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.4.3
+
+Insider Threat Matrix detections catalog, merged into the master sweep.
+
+- New `catalogs/dfir_itm_detections.yaml` (92 queries) mapped to
+  [Insider Threat Matrix](https://insiderthreatmatrix.org/detections) detection IDs (anti-forensics,
+  browser/OS artifacts, USB, registry, DNS/proxy/VPN, cloud resource deletion, M365/Entra). Query
+  bodies were live-validated against SDL and kept exactly as authored (`strftime`, `||`, `matches`,
+  and cloud `dataSource.name`/`eventName` all confirmed valid, so nothing was "fixed"). Each is
+  scope-labelled: 87 subject, 5 aggregate volume timelines as `environment`.
+- Merged into the master `dfir_insider_threat_full` de-duplicated by body (7 exact-body duplicates
+  skipped, different ITM detection IDs that reduce to the same telemetry query); the master is now
+  **725 queries**, with 0 exact-body duplicates remaining.
+- Docs refreshed (README / user guide / catalog guide) for the scope model, the wall-timeout and
+  interrupted-run behavior, and the new catalogs.
+
 ## v0.4.2
 
 Query scope enforcement (stop investigations pulling the whole tenant), faster
@@ -27,12 +43,6 @@ verified live against a tenant before shipping.
   query that lacks its filter; a bundled-catalog regression test fails the build
   if the leak is ever reintroduced.
 - New `catalogs/dfir_location_compliance.yaml` (63 subject-scoped queries).
-- New `catalogs/dfir_itm_detections.yaml` (92 queries) mapped to
-  [Insider Threat Matrix](https://insiderthreatmatrix.org/detections) detection IDs (anti-forensics,
-  browser/OS artifacts, USB, registry, DNS/proxy/VPN, cloud resource deletion, M365/Entra). Query
-  bodies were live-validated and kept exactly as authored; each is scope-labelled (87 subject, 5
-  aggregate volume timelines as environment). Merged into the master `dfir_insider_threat_full`
-  de-duplicated by body (7 exact-body duplicates skipped); the master is now 725 queries.
 
 ### Execution reliability
 
