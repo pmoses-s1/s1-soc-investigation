@@ -50,6 +50,7 @@ variables allow. Query counts below are as of v0.4.2; the catalog dropdown in th
 | `dfir_cloud` | 3 | Cloud | Cloud control-plane activity (e.g. AWS). |
 | `dfir_correlation` | 15 | Cross-source correlation | Quick pivots and multi-source stitching (session keys, login keys, IOC sweeps). |
 | `dfir_location_compliance` | 63 | Location / residency | Where was the subject working from? Okta, ZPA, ZIA, EDR LAN evidence, OS timezone/WiFi artifacts, badge access, travel (Navan), and multi-source daily country evidence for remote-work / residency compliance cases. All subject-scoped. |
+| `dfir_itm_detections` | 92 | Insider Threat Matrix | Daily-count feasibility timelines mapped to [Insider Threat Matrix](https://insiderthreatmatrix.org/detections) detections (dt IDs): anti-forensics (history/log clearing, VSS delete), browser and OS artifacts, USB/removable media, registry persistence, DNS/proxy/VPN, cloud resource deletion (AWS/GCP/Azure/OCI), and M365/Entra identity and mailbox activity. 87 subject-scoped; 5 aggregate volume timelines are `environment`. |
 | `dfir_insider_threat_full` | 640 | Master (full sweep) | Every domain query in one catalog, de-duplicated, for a one-click full investigation. |
 | `insider_threat` | 6 | Minimal example | A tiny sample for demos and smoke tests. |
 

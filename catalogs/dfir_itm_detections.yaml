@@ -1,0 +1,1106 @@
+name: 'DFIR: Insider Threat Matrix Detections'
+queries:
+- id: dt001_consolehost_history_recreated
+  title: ConsoleHost_history.txt created/deleted (possible anti-forensics)
+  pq: 'tgt.file.path contains ''ConsoleHost_history.txt'' event.type in (''File Creation'',''File Deletion'') (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt002_consolehost_history_missing
+  title: ConsoleHost_history.txt deletion events
+  pq: 'tgt.file.path contains ''ConsoleHost_history.txt'' event.type = ''File Deletion'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt003_file_deletion_activity
+  title: Windows file deletion activity
+  pq: 'event.type = ''File Deletion'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt009_file_canary_access
+  title: Canary file accessed/opened
+  pq: 'tgt.file.path contains "{{entity}}" event.type in (''File Open'',''File Modification'') (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt014_edr_telemetry_offbox
+  title: EDR/SDL telemetry volume for entity (proof logs leave the endpoint)
+  pq: 'endpoint.name = * (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt017_firefox_history_file_touch
+  title: Firefox places.sqlite / favicons.sqlite touched
+  pq: 'tgt.file.path contains ''Mozilla\\Firefox\\Profiles'' tgt.file.path matches ''(places|favicons)\\.sqlite'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt018_edge_history_file_touch
+  title: Edge history.sqlite touched
+  pq: 'tgt.file.path contains ''Microsoft\\Edge\\User Data'' tgt.file.path contains ''history'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt019_chrome_history_file_touch
+  title: Chrome history.sqlite touched
+  pq: 'tgt.file.path contains ''Google\\Chrome\\User Data'' tgt.file.path contains ''history'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt026_lnk_file_created
+  title: Windows .lnk shortcut created
+  pq: 'tgt.file.path contains ''Recent'' tgt.file.path matches ''\\.lnk$'' event.type = ''File Creation'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt027_prefetch_file_created
+  title: Prefetch (.pf) file created
+  pq: 'tgt.file.path contains ''\\Windows\\Prefetch\\'' tgt.file.path matches ''\\.pf$'' event.type = ''File Creation'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt028_file_metadata_sample
+  title: File create/modify events with metadata (size/hash/timestamps)
+  pq: 'event.type in (''File Creation'',''File Modification'') (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt036_jump_list_created
+  title: Jump list (AutomaticDestinations/CustomDestinations) created
+  pq: 'tgt.file.path matches ''Recent\\\\(Automatic|Custom)Destinations'' event.type = ''File Creation'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt038_recycle_bin_activity
+  title: $Recycle.Bin file creation (post-delete artifacts)
+  pq: 'tgt.file.path contains ''$Recycle.Bin'' event.type in (''File Creation'',''File Modification'') (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt053_bash_history_missing
+  title: ~/.bash_history deleted (Linux/macOS)
+  pq: 'tgt.file.path contains ''.bash_history'' event.type = ''File Deletion'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt054_bash_history_recreated
+  title: ~/.bash_history created/modified (Linux/macOS)
+  pq: 'tgt.file.path contains ''.bash_history'' event.type in (''File Creation'',''File Modification'') (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt057_chrome_cookies_touch
+  title: Chrome cookies DB touched
+  pq: 'tgt.file.path contains ''Google\\Chrome\\User Data'' tgt.file.path contains ''cookies'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt058_chrome_login_data_touch
+  title: Chrome Login Data DB touched
+  pq: 'tgt.file.path contains ''Google\\Chrome\\User Data'' tgt.file.path contains ''Login Data'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt059_chrome_bookmarks_touch
+  title: Chrome Bookmarks file touched
+  pq: 'tgt.file.path contains ''Google\\Chrome\\User Data'' tgt.file.path contains ''Bookmarks'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt060_chrome_extension_installed
+  title: New Chrome extension directory created
+  pq: 'tgt.file.path contains ''Google\\Chrome\\User Data'' tgt.file.path contains ''\\Extensions\\'' event.type = ''File Creation'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt061_notepad_tabstate_created
+  title: Notepad TabState (.bin) created/modified
+  pq: 'tgt.file.path contains ''Microsoft.WindowsNotepad_8wekyb3d8bbwe\\LocalState\\TabState'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt083_map_network_drive_mru
+  title: Map Network Drive MRU registry write
+  pq: 'registry.keyPath contains ''Map Network Drive MRU'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt084_typedpaths_written
+  title: TypedPaths registry write (Explorer path bar)
+  pq: 'registry.keyPath contains ''TypedPaths'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt085_network_registry_key
+  title: Persistent network drive mapping registry write
+  pq: 'registry.keyPath contains ''Software\\Microsoft\\Windows\\CurrentVersion\\Explorer'' registry.keyPath contains ''Network'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt088_bash_history_touch
+  title: Bash history file accessed/modified
+  pq: 'tgt.file.path contains ''.bash_history'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt089_azuread_powershell_log_or_cmdline
+  title: AzureAD PowerShell interaction (cmdline)
+  pq: 'src.process.name contains ''powershell'' src.process.cmdline matches ''(Connect-AzureAD|Connect-MgGraph)'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt090_activitiescache_touch
+  title: ActivitiesCache.db (clipboard history) touched
+  pq: 'tgt.file.path contains ''ConnectedDevicesPlatform'' tgt.file.path contains ''ActivitiesCache.db'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt105_vssadmin_shadow_delete
+  title: vssadmin shadow copy deletion (ransomware/anti-forensics)
+  pq: 'src.process.cmdline contains ''vssadmin'' src.process.cmdline matches ''delete\\s+shadows'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt108_macos_fsevents_native
+  title: macOS native file activity (FSEvents-equivalent)
+  pq: 'endpoint.os.name contains ''macOS'' event.type in (''File Creation'',''File Modification'',''File Deletion'',''File Rename'') (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt119_systempropertiesremote_exec
+  title: SystemPropertiesRemote.exe executed
+  pq: 'src.process.name = ''SystemPropertiesRemote.exe'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt120_rdp_registry_enabled
+  title: RDP enabled via fDenyTSConnections registry change
+  pq: 'registry.keyPath contains ''Terminal Server'' registry.valueName = ''fDenyTSConnections'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt122_remote_access_platform_dns
+  title: DNS/network to web-based remote access platforms
+  pq: 'dns.request matches ''(logmein\\.com|remotedesktop\\.google\\.com|anydesk\\.com|rdweb\\.wvd\\.microsoft\\.com|teamviewer\\.com|parsec\\.app|splashtop\\.com)'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt123_wsl_mnt_c_access
+  title: WSL shell referencing /mnt/c/ (Windows host bypass)
+  pq: 'src.process.name in (''bash.exe'',''wsl.exe'',''sh.exe'',''zsh.exe'') src.process.cmdline contains ''/mnt/c/'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt124_wsl_new_distro_install
+  title: New WSL distribution installed/registered
+  pq: 'src.process.name = ''wsl.exe'' src.process.cmdline matches ''(--install|--import)'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt126_start_trackprogs_modified
+  title: Start_TrackProgs registry value modified (disables UserAssist/RunMRU)
+  pq: 'registry.keyPath contains ''CurrentVersion\\Explorer\\Advanced'' registry.valueName = ''Start_TrackProgs'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt127_runmru_userassist_write_volume
+  title: RunMRU / UserAssist registry write volume (baseline for absence detection)
+  pq: 'registry.keyPath matches ''(RunMRU|UserAssist)'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt129_snipping_tool_screenshot
+  title: Snipping Tool screenshot saved
+  pq: 'tgt.file.path contains ''Pictures\\Screenshots'' tgt.file.path matches ''Screenshot [0-9]{4}-[0-9]{2}-[0-9]{2}'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt130_snipping_tool_tempstate_snips
+  title: Snipping Tool TempState\Snips fallback screenshot
+  pq: 'tgt.file.path contains ''Microsoft.ScreenSketch_8wekyb3d8bbwe\\TempState\\Snips'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt131_snipping_tool_recording
+  title: Snipping Tool screen recording saved
+  pq: 'tgt.file.path contains ''Videos\\Screen Recordings'' tgt.file.path matches ''Screen Recording [0-9]{4}-[0-9]{2}-[0-9]{2}'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt132_snipping_tool_tempstate_recordings
+  title: Snipping Tool TempState\Recordings fallback recording
+  pq: 'tgt.file.path contains ''Microsoft.ScreenSketch_8wekyb3d8bbwe\\TempState\\Recordings'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt134_python_repl_history
+  title: Python REPL usage (.python_history / bare python execution)
+  pq: '((tgt.file.path contains ''.python_history'') || (src.process.name in (''python.exe'',''python3'',''python'') && !(src.process.cmdline matches ''\\.py''))) (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt135_onedrive_safedelete_touch
+  title: OneDrive SafeDelete.db touched (synced-file deletion)
+  pq: 'tgt.file.path contains ''Microsoft\\OneDrive\\settings\\Personal\\SafeDelete.db'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt138_hosts_file_modified
+  title: hosts file modified (DNS override / telemetry evasion)
+  pq: 'tgt.file.path in (''C:\\Windows\\System32\\drivers\\etc\\hosts'',''/etc/hosts'') event.type = ''File Modification'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt043_process_creation_activity
+  title: Process creation activity (Sysmon Event 1 equivalent)
+  pq: 'event.type = ''Process Creation'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt044_linux_dpkg_process
+  title: Linux package install/remove via dpkg/apt (dpkg.log alternative)
+  pq: 'src.process.name in (''dpkg'',''apt'',''apt-get'') src.process.cmdline matches ''(install|remove)'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt055_powershell_cmdline_activity
+  title: PowerShell execution with full command line
+  pq: 'src.process.name contains ''powershell'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt081_tamper_indicator_activity
+  title: Security-software anti-tampering indicator activity
+  pq: 'indicator.category = * indicator.description matches ''(?i)tamper'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt095_software_uninstall_msiexec
+  title: Software uninstall via msiexec (Event 11724/1034 alternative)
+  pq: 'src.process.name = ''msiexec.exe'' src.process.cmdline contains ''/x'' (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt101_ueba_activity_volume
+  title: Per-user daily activity volume (UBA baselining input)
+  pq: 'src.process.user = * (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt102_ueba_entity_activity_volume
+  title: Per-entity daily activity volume (UEBA baselining input)
+  pq: 'endpoint.name = * (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt113_violation_indicator_trend
+  title: Indicator/alert volume trend per entity (policy-violation pattern proxy)
+  pq: 'indicator.category = * (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt046_edr_agent_heartbeat
+  title: Endpoint telemetry volume (agent health / coverage check)
+  pq: 'endpoint.name = * (endpoint.name contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt021_usb_device_connect
+  title: USB mass-storage device connected (Device Control)
+  pq: '(event.category = ''device'' || event.type contains ''USB'') endpoint.name contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt087_usb_mountpoints2_alt
+  title: USB device connect (MountPoints2 alternative)
+  pq: '(event.category = ''device'' || event.type contains ''USB'') endpoint.name contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt099_removable_storage_audit
+  title: Removable storage access/write attempt (Device Control policy)
+  pq: '(event.category = ''device'' || event.type contains ''USB'') endpoint.name contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt051_dns_query_activity
+  title: DNS query activity for entity/endpoint
+  pq: 'dns.request = * endpoint.name contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt096_dns_monitoring_volume
+  title: DNS query volume (tunneling/anomaly baselining)
+  pq: 'dns.request = * endpoint.name contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt068_logon_activity
+  title: Interactive/network logon activity (logon/logoff timeline)
+  pq: 'event.category = ''logins'' | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: environment
+- id: dt011_honey_user_login_attempt
+  title: Login attempt against a honey/decoy account
+  pq: 'event.login.userName contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt104_leaver_watchlist_activity
+  title: Any login/EDR activity for a departed-employee account
+  pq: '(event.login.userName contains:anycase("{{entity}}") || src.process.user contains:anycase("{{entity}}")) | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt010_honeypot_inbound_connection
+  title: Inbound network connection to a honeypot host/IP
+  pq: '(dst.ip.address = "{{entity}}" || src.ip.address = "{{entity}}") endpoint.name contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt004_audit_log_cleared
+  title: Security audit log cleared (Event 1102)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId = 1102 winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt015_local_account_deleted
+  title: Local Windows account deleted (Event 4726)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId = 4726 winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt016_system_shutdown
+  title: System shutdown/unclean reboot (Events 41/1074)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId in (41, 1074) winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt056_user_account_deleted_evtlog
+  title: User/computer account deletion (Event 4726/4743)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId in (4726, 4743) winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt082_firewall_rule_changed
+  title: Local Windows Firewall rule changed (Events 4946-4950)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId in (4946, 4947, 4948, 4950) winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt109_system_time_modified
+  title: System time modified (Event 4616)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId = 4616 winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt121_rdp_group_membership_change
+  title: User added to Remote Desktop Users group (Event 4732)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId = 4732 winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt111_honey_spn_ticket_request
+  title: Kerberos service-ticket request for a honey SPN (Event 4769)
+  pq: 'dataSource.name=''Windows Event Logs'' winEventLog.eventId = 4769 winEventLog.description contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt064_aws_resource_deletion
+  title: AWS resource deletion (CloudTrail)
+  pq: 'dataSource.name=''AWS CloudTrail'' eventName in (''DeleteBucket'',''DeleteDBInstance'',''TerminateInstances'') message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt115_aws_unauthorized_resource_activity
+  title: AWS unauthorized/unapproved resource creation
+  pq: 'dataSource.name=''AWS CloudTrail'' eventName in (''RunInstances'',''CreateVolume'',''CreateBucket'',''CreateFunction'',''UpdateFunctionCode'',''CreateCluster'') message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt065_gcp_resource_deletion
+  title: GCP resource deletion (Cloud Audit Logs)
+  pq: 'dataSource.name=''GCP Audit Logs'' protoPayload.methodName in (''storage.buckets.delete'',''v1.compute.instances.delete'') message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt116_gcp_unauthorized_resource_activity
+  title: GCP unauthorized/unapproved resource creation
+  pq: 'dataSource.name=''GCP Audit Logs'' protoPayload.methodName in (''compute.instances.insert'',''storage.buckets.create'',''compute.disks.insert'',''iam.serviceAccounts.create'') message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt066_azure_resource_deletion
+  title: Azure resource deletion (Activity Log)
+  pq: 'dataSource.name=''Azure Activity Logs'' operationName contains ''delete'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt117_azure_unauthorized_resource_activity
+  title: Azure unauthorized/unapproved resource creation
+  pq: 'dataSource.name=''Azure Activity Logs'' operationName matches ''(virtualMachines/write|storageAccounts/write|vaults/write|roleAssignments/write)'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt118_oci_unauthorized_resource_activity
+  title: OCI unauthorized/unapproved resource creation
+  pq: 'dataSource.name=''OCI Audit Logs'' eventName in (''LaunchInstance'',''CreateBucket'',''CreateVolume'',''CreateVcn'') message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt050_impossible_travel
+  title: Sign-ins for entity across distinct locations (impossible-travel input)
+  pq: 'dataSource.name=''Microsoft Entra Sign-in Logs'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt062_m365_admin_signin
+  title: M365 sign-in activity (Admin Center equivalent)
+  pq: 'dataSource.name=''Microsoft Entra Sign-in Logs'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt063_entra_signin_logs
+  title: Entra ID sign-in logs
+  pq: 'dataSource.name=''Microsoft Entra Sign-in Logs'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt094_m365_unified_audit_log
+  title: Microsoft 365 Unified Audit Log activity
+  pq: 'dataSource.name=''Microsoft 365 Unified Audit Log'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt106_entra_pim_audit
+  title: Entra PIM role elevation audit
+  pq: 'dataSource.name=''Microsoft Entra PIM Audit'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt107_teams_call_history
+  title: Teams meeting/call participation
+  pq: 'dataSource.name=''Microsoft Teams Call Records'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt110_mip_label_activity
+  title: MIP sensitivity label applied/downgraded
+  pq: 'dataSource.name=''Microsoft Purview Audit'' message matches ''(?i)sensitivity ?label'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt128_ediscovery_keyword_proxy
+  title: Exfil/staging keyword hits in mail & file activity (eDiscovery proxy)
+  pq: 'dataSource.name=''Microsoft 365 Unified Audit Log'' message matches ''(?i)(resign|personal email|send to home|wetransfer|dropbox|telegram)'' | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: environment
+- id: dt140_mailbox_forwarding_rule
+  title: Mailbox forwarding/redirect rule created
+  pq: 'dataSource.name=''Microsoft 365 Unified Audit Log'' message matches ''(?i)(New-InboxRule|ForwardingSmtpAddress)'' | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: environment
+- id: dt141_mailbox_permission_granted
+  title: Mailbox permission granted to another user
+  pq: 'dataSource.name=''Microsoft 365 Unified Audit Log'' message contains ''Add-MailboxPermission'' | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: environment
+- id: dt142_sharepoint_onedrive_external_share
+  title: SharePoint/OneDrive file shared externally
+  pq: 'dataSource.name=''Microsoft 365 Unified Audit Log'' message matches ''(?i)(SharingInvitationCreated|SharingSet|AnonymousLinkCreated)'' | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: environment
+- id: dt039_web_proxy_activity
+  title: Web proxy request activity for entity
+  pq: 'dataSource.name=''Web Proxy Logs'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt041_email_gateway_activity
+  title: Inbound/outbound email gateway activity for entity
+  pq: 'dataSource.name=''Email Gateway'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt042_nids_alert_activity
+  title: NIDS/NGFW alerts referencing entity
+  pq: 'dataSource.name=''NIDS'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt098_netflow_volume
+  title: NetFlow volume to/from entity
+  pq: 'dataSource.name=''NetFlow'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt100_vpn_session_activity
+  title: VPN session activity for entity
+  pq: 'dataSource.name=''VPN Logs'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
+- id: dt137_badge_vs_login_join
+  title: Login events for entity with no matching badge entry (needs join with badge logs)
+  pq: 'dataSource.name=''Physical Access Logs'' message contains:anycase("{{entity}}") | group hits=count() by event_day=strftime(timestamp, "%Y-%m-%d") | sort event_day
+
+    '
+  merge:
+    kind: aggregate
+    key_cols:
+    - event_day
+    sum_cols:
+    - hits
+  scope: subject
