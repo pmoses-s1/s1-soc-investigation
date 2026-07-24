@@ -76,7 +76,9 @@ variable here, grouped into three sections, each field with its own **?**:
 - **Investigation subject:** `hostname`, `agent_uuid`, `ip`, `username`, `sf_user_id`, `session`,
   `app_name`, `domain`, `login_key`, `file_or_title`. A query whose subject variables are not all set
   is **skipped, not failed**, so you can run the identity phase first, then fill in what you discover
-  and re-run to light up the rest.
+  and re-run to light up the rest. This is also the scope guardrail: a query labelled `subject` is
+  hard-skipped (reason "needs a subject value") until at least one of its subject values is set, so an
+  investigation never silently runs a query across the whole tenant.
 - **Config datatables (optional):** the datatable names for the identity-mapping queries. Set the ones
   your tenant has; leave the rest blank to skip those queries.
 - **Data source names (optional overrides):** the SDL `serverHost` sources each query reads (zia, okta,
@@ -84,8 +86,9 @@ variable here, grouped into three sections, each field with its own **?**:
   box; override one only if your tenant ingests that source under a different name.
 
 **Import variables / Export variables** save the whole set to a JSON file or load one, so you can reuse
-a configuration across cases or share it with a teammate. `{{entity}}` itself is set on the run form,
-not here.
+a configuration across cases or share it with a teammate. **Clear variables** empties every field (and
+the saved set) so you can start fresh; the entity on the run form is untouched. `{{entity}}` itself is
+set on the run form, not here.
 
 ---
 
@@ -136,9 +139,11 @@ These control resilience and cost:
 
 ### Scope and preview
 
-**Select queries** runs only a subset of the catalog. Search by id or title, use **Select all** to
-toggle the filtered list (with a live count), and the cost preview shows the job count (runnable
-queries x slices, with a skipped count) before you commit.
+**Select queries** runs only a subset of the catalog. Search by id, title, or scope; use **Select all**
+to toggle the filtered list (with a live count); and the cost preview shows the job count (runnable
+queries x slices, with a skipped count) before you commit. Each query shows a colour-coded **scope tag**
+(`subject` / `pivot` / `environment` / `coverage`) so you can see at a glance which queries are scoped
+to the subject and which are intentionally tenant-wide.
 
 ![Select queries: search and select-all](images/09-select-queries.png)
 

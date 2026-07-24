@@ -27,6 +27,12 @@ verified live against a tenant before shipping.
   query that lacks its filter; a bundled-catalog regression test fails the build
   if the leak is ever reintroduced.
 - New `catalogs/dfir_location_compliance.yaml` (63 subject-scoped queries).
+- New `catalogs/dfir_itm_detections.yaml` (92 queries) mapped to
+  [Insider Threat Matrix](https://insiderthreatmatrix.org/detections) detection IDs (anti-forensics,
+  browser/OS artifacts, USB, registry, DNS/proxy/VPN, cloud resource deletion, M365/Entra). Query
+  bodies were live-validated and kept exactly as authored; each is scope-labelled (87 subject, 5
+  aggregate volume timelines as environment). Merged into the master `dfir_insider_threat_full`
+  de-duplicated by body (7 exact-body duplicates skipped); the master is now 725 queries.
 
 ### Execution reliability
 

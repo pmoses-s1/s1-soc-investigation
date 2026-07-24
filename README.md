@@ -6,8 +6,10 @@
 
 An execution engine and query library for long (90+ day) DFIR and insider-threat investigations over the
 SentinelOne Singularity Data Lake, without the timeouts, rate limits, and silently-skipped queries that
-break notebook automation. It ships ~1,300 curated DFIR queries across identity, endpoint, web/DLP,
-SaaS, AI, cloud, and cross-source correlation, and runs them slice by slice as a local, hardened Docker
+break notebook automation. It ships ~1,500 curated DFIR queries across identity, endpoint, web/DLP,
+SaaS, AI, cloud, location/residency, Insider Threat Matrix detections, and cross-source correlation,
+each scoped to the investigation subject (or explicitly labelled tenant-wide), and runs them slice by
+slice as a local, hardened Docker
 web app: pick a catalogue, an entity, and a lookback, hit Start, and get a findings-first verification
 report that proves every query ran, plus a workbook and downloadable logs. It is self-healing along the
 way, skipping days when a source has no data, aborting broken queries instead of re-failing them, and letting
@@ -108,7 +110,13 @@ Concretely, it lets you:
 At a glance (details below):
 
 - **Reliable long lookbacks.** Day-slicing, durable ledger with resume, retry/subdivide, merge-aware
-  reassembly, and a content-addressed cache so re-runs execute only new or changed days.
+  reassembly, and a content-addressed cache so re-runs execute only new or changed days. A wall timeout
+  subdivides the day immediately (a heavy slice is not retried at the same size), and an interrupted run
+  recovers its verdict from the ledger on reopen, so it stays accurate and resumable, never "unknown".
+- **Subject scoping (no tenant-wide leaks).** Every query is labelled `subject` / `pivot` /
+  `environment` / `coverage`. A subject query is hard-skipped until a subject value is set, so a
+  single-subject investigation never silently returns the whole tenant; a `validate` audit flags any
+  subject query missing its filter.
 - **Self-healing execution.** Broken-query circuit breaker (aborts a query that keeps failing), and a
   per-day source-existence pre-check that skips a source's queries on days it has no data.
 - **Source-field aware.** Probes both `serverHost` and `dataSource.name`, warns on a field mismatch, and
@@ -121,8 +129,9 @@ At a glance (details below):
 - **Plan and control.** Cost preview, Test connection, Recent runs + resume, query subset with
   search / select-all.
 - **Variables.** Subject inputs, config datatables, and overridable source names, with import/export.
-- **Catalogs + harness.** ~1,300 DFIR queries across domains, plus a linter and a `validate` command
-  that checks queries (with dummy vars) before a long run.
+- **Catalogs + harness.** ~1,500 DFIR queries across domains (incl. location/residency and Insider
+  Threat Matrix detections), plus a linter, a scope audit, and a `validate` command that checks queries
+  (with dummy vars) before a long run.
 - **Exports.** Per-case `.xlsx` workbook, plus CSV/JSON/manifest and downloadable logs.
 - **Hardened Docker.** Loopback by default, optional token auth, non-root runtime, auto-fixed volume
   permissions, one-command install.
@@ -130,8 +139,9 @@ At a glance (details below):
 ## What it does
 
 **Resilient execution.** UTC day-slicing, a durable SQLite job ledger with resume, retry with error
-classification (429 backs off, 5xx/timeout retries then subdivides, 400 syntax is permanent), and
-merge-aware reassembly (count/sum additive, min/max reduce, estimate_distinct flagged approximate).
+classification (429 backs off, 5xx retries then subdivides, a wall timeout subdivides immediately, 400
+syntax is permanent), and merge-aware reassembly (count/sum additive, min/max reduce, estimate_distinct
+flagged approximate).
 
 **Broken-query circuit breaker.** A query that is deterministically broken should not re-fail on every
 day-slice. When a query is rejected outright (400 syntax) or keeps failing after retries and
@@ -206,9 +216,10 @@ slice, or one bad query, never sinks the run:
 | Outcome | Classified as | What the engine does |
 |---|---|---|
 | **429** rate limit | throttle | Backs off, returns the slice to pending, and re-queues it. The AIMD controller lowers concurrency. Not counted against the retry budget. |
-| **5xx / timeout** | transient | Retries up to **Max attempts** (default 4) with exponential backoff, then **subdivides** the day into smaller windows and retries those. Genuine blips recover here. |
+| **5xx / dropped connection** | transient | Retries up to **Max attempts** (default 4) with exponential backoff, then **subdivides** the day into smaller windows and retries those. Genuine blips recover here. |
+| **Wall timeout** (slice exceeded its budget) | too-heavy | **Subdivides the day immediately** instead of retrying the same-size slice (which would just time out again). At the smallest window it fails with a "scope to a subject or shorten the lookback" hint. |
 | **400 syntax / rejected** | permanent | Never retried (it will always fail). The slice is marked permanent and the **circuit breaker** trips for that query. |
-| **Repeated 5xx** (retries **and** subdivision exhausted) | needs fix | Treated as a deterministic query error: the slice is marked failed and the **circuit breaker** trips, flagging the query as needing a fix. |
+| **Repeated failure** (retries **and** subdivision exhausted) | needs fix | Treated as a deterministic query error: the slice is marked failed and the **circuit breaker** trips, flagging the query as needing a fix. |
 
 **Circuit breaker.** Once a query trips the breaker (permanent rejection, or a repeated failure that
 survived retries and subdivision), the engine skips that query's remaining slices instead of re-failing
@@ -227,18 +238,25 @@ fixed query actually re-executes against the backend, so the correction is cheap
 window. (Plain **Resume** re-runs a run's still-pending slices with their original query text; use a new
 run to pick up an edited query.)
 
+**Interrupted runs never show "unknown".** A terminal status is always persisted (even if the run
+raised), and if the process was killed mid-run the verdict is recomputed from the ledger DB on reopen.
+So a reopened run shows an accurate status (complete / incomplete) and stays resumable, Resume reuses
+the same ledger and re-runs only the still-outstanding slices, keeping completed days.
+
 **Output-folder permissions.** In Docker, the container makes the mounted `/data` folder writable for
 its runtime user automatically. If it still cannot write (for example a read-only mount), it prints a
 clear remediation message and exits instead of crashing with a stack trace.
 
 ## DFIR catalogs and variables
 
-The bundled `catalogs/` are a DFIR / insider-threat query library (~1,300 queries) organized by
+The bundled `catalogs/` are a DFIR / insider-threat query library (~1,500 queries) organized by
 investigation domain: identity & coverage, endpoint, collaboration & storage, web & DLP, SaaS, AI /
-Prompt Security, cloud, exfil, and cross-source correlation, plus a master `dfir_insider_threat_full`
-for a one-click full sweep. Pick a domain catalog per phase, or the master. The
-[catalog guide](docs/catalog-guide.md) documents each catalog and a logical run order; recent changes
-are in the [changelog](CHANGELOG.md).
+Prompt Security, cloud, exfil, location/residency, Insider Threat Matrix detections, and cross-source
+correlation, plus a master `dfir_insider_threat_full` (725 queries) for a one-click full sweep. Every
+query carries a `scope` (`subject` / `pivot` / `environment` / `coverage`): subject queries are
+hard-skipped until a subject value is set, so an investigation never silently runs tenant-wide. Pick a
+domain catalog per phase, or the master. The [catalog guide](docs/catalog-guide.md) documents each
+catalog, the scope model, and a logical run order; recent changes are in the [changelog](CHANGELOG.md).
 
 Validate the library with the built-in test harness: `python -m s1engine.cli validate --lint-only`
 (offline) or `python -m s1engine.cli validate` (launches each query with dummy variables against SDL).
